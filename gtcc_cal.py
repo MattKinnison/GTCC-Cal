@@ -1,78 +1,27 @@
 from bottle import Bottle, run, request, static_file
-from PIL import Image, ImageFont, ImageDraw
 import datetime
-import json
 import requests
 import xmltodict
 import dateutil.parser
 import pytz
 import textwrap
-import sys
-import calendar
-import os
+import cal_maker
+import pprint as pp
 
 app = Bottle()
 
 eastern = pytz.timezone('US/Eastern')
 
-months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+def load_html(files):
+    templates = {}
+    for file in files:
+        with open('html\\'+file+'.html') as f:
+            templates[file] = f.read()
+    return templates
 
-# Set Category colors
-colors = {  "Faith Formation": (136,40,136),
-            "Community Life": (57,83,164),
-            "Freshmen Events": (57,83,164),
-            "Liturgy": (225,72,154),
-            "Outreach": (12,128,64),
-            "Knights of Columbus": (237,31,36),
-            "Graduate Student Events": (246,133,32),
-            "FOCUS": (2,147,140),
-            "Other": (0,0,0)
-          }
+templates = load_html(['home','template','accordion','weekGT','accordion_all_day', 'weekFB'])
 
-gt_order = {  "Faith Formation": 4,
-            "Community Life": 5,
-            "Freshmen Events": 5,
-            "Liturgy": 1,
-            "Outreach": 2,
-            "Knights of Columbus": 0,
-            "Graduate Student Events": 3,
-            "FOCUS": 0,
-            "Other": 0
-          }
-
-temp = '''<div class="panel panel-default">
-<div class="panel-heading">
-<h4 class="panel-title">
-<a data-toggle="collapse" data-parent="#accordion" href="#collapse{id}">
-{title} - {month}/{day_}</a>
-</h4>
-</div>
-<div id="collapse{id}" class="panel-collapse collapse">
-<div class="panel-body">
-<div class="checkbox">
-    <label><input type="checkbox" checked>Include event in graphic?</label>
-</div>
-<div class="form-group">
-    <label for="email">Title:</label>
-    <input type="text" class="form-control" id="title{id}" value ="{title}">
- </div>
- <div class="checkbox">
-     <label><input type="checkbox">Include description in graphic?</label>
- </div>
- <div class="form-group">
-  <label for="comment">Desciption:</label>
-  <textarea class="form-control" rows="5" id="desciption{id}">{description}</textarea>
-</div>
-</div>
-</div>
-</div>
-'''
-
-def next_weekday(d, weekday): # 0 = Monday, 1=Tuesday, 2=Wednesday...
-    days_ahead = weekday - d.weekday()
-    if days_ahead <= 0: # Target day already happened this week
-        days_ahead += 7
-    return d + datetime.timedelta(days_ahead)
+cal_feed = {}
 
 def d_to_dt(d):
     return eastern.localize(datetime.datetime.combine(d,datetime.time.min))
@@ -82,153 +31,172 @@ def refresh_OrgSync():
     feed = xmltodict.parse(requests.get('https://api.orgsync.com/api/v3/portals/137015/events.rss?key=dxtLPV3wbG0wDsb2iUmu5ImQFhUQpH_CsBHPl_CH9gs&per_page=100&upcoming=true').text)['rss']['channel']['item']
     # Reformat dates
     for item in feed:
-        item['event:startdate'] = dateutil.parser.parse(item['event:startdate']).astimezone()
-        item['event:enddate'] = dateutil.parser.parse(item['event:enddate']).astimezone()
+        item['event:startdate'] = dateutil.parser.parse(item['event:startdate']).astimezone(eastern)
+        item['event:enddate'] = dateutil.parser.parse(item['event:enddate']).astimezone(eastern)
         item['isallday'] = (item['event:enddate']-item['event:startdate']).total_seconds() % 86400 == 0
+        if item['isallday']:
+            item['event:startdate'] = item['event:startdate'] + datetime.timedelta(4/24)
+            item['event:enddate'] = item['event:enddate'] - datetime.timedelta(4/24)
     # Group By dates
     start = min([item['event:startdate'].date() for item in feed])
     last = max([item['event:enddate'].date() for item in feed])
-    cal_feed = {d_to_dt(datetime.timedelta(day) + start):
-        {'All Day': [item for item in feed if item['event:startdate'] < d_to_dt(datetime.timedelta(day,hours=20) + start) and item['event:enddate'] >= d_to_dt(datetime.timedelta(day) + start - datetime.timedelta(hours=4)) and item['isallday']],
-         'Short': [item for item in feed if item['event:startdate'] <= d_to_dt(datetime.timedelta(day+1) + start) and item['event:enddate'] >= d_to_dt(datetime.timedelta(day) + start) and item['event:enddate'] - item['event:startdate'] < datetime.timedelta(1)]} for day in range((last - start).days)}
-    return cal_feed
-
-def week_at_a_glance(cal_feed, adj_week, start_time = datetime.date.today(), spec_title = False):
-    # Get Monday after start_time at midnight
-    next_monday = d_to_dt(next_weekday(start_time+datetime.timedelta(adj_week*7), 0))
-    # Make title date range
-    week_str = (months[next_monday.month - 1] + ' ' +
-                str(next_monday.day) + ' - ' +
-                months[(next_monday + datetime.timedelta(6)).month - 1] + ' ' +
-                str((next_monday + datetime.timedelta(6)).day))
-    # Pull image from template
-    img = Image.open("template.png")
-    draw = ImageDraw.Draw(img)
-
-    # Initialize Fonts
-    title = ImageFont.truetype("Carme-Regular.ttf", 88)
-    day_font = ImageFont.truetype("Roboto-Black.ttf", 22)
-    all_day = ImageFont.truetype("Roboto-Bold.ttf", 16)
-    event = ImageFont.truetype("Roboto-Regular.ttf", 16)
-
-    # Draw Title
-    draw.text((10, 20),spec_title if spec_title else week_str,(255, 222, 118),font=title)
-
-    to_edit = {}
-    # Loop through the 7 days of the week
-    for n in range(7):
-        # Increment days
-        wr_day = next_monday + datetime.timedelta(n)
-        # Draw calendar date onto calendar
-        draw.text((10+166*n, 200), str(wr_day.day), (0,0,0), font=day_font)
-
-        # mth row to write text on
-        m = 0
-        to_edit[wr_day] = {'All Day': [],'Short': []}
-        # Iterate through the OrgSync Feed
-        for item in cal_feed[wr_day]['All Day']:
-            to_edit[wr_day]['All Day'].append(item)
-            # Create event string
-            if 'Apologetics' in item['title'] or 'Theology of the Body' in item['title'] or 'Scripture Study' in item['title']:
-                to_draw = (item['title'].split(':')[0])
-            else:
-                to_draw = item['title']
-            # Use textwrap to make sure line doesn't exceed calendar day
-            m1 = m
-            for line in textwrap.wrap(to_draw, width=16):
-                draw.line([(166*n,233+20*m1),(166*(n+1),233+20*m1)],fill=colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other'],width=20)
-                #o = draw.textsize(line,font=event)[0]
-                m1 = m1 + 1
-            for line in textwrap.wrap(to_draw, width=16):
-                if ((wr_day - datetime.timedelta(1)) in cal_feed and item not in cal_feed[wr_day - datetime.timedelta(1)]['All Day']) or wr_day.weekday() == 0:
-                    draw.text((10+166*n, 225+20*m),line,(255,255,255),font=all_day)
-                # Increment line by 1 once written
-                m = m + 1
-        for item in cal_feed[wr_day]['Short']:
-            to_edit[wr_day]['Short'].append(item)
-            if 'Apologetics' in item['title'] or 'Theology of the Body' in item['title'] or 'Scripture Study' in item['title']:
-                to_d = (item['title'].split(':')[0])
-            else:
-                to_d = item['title']
-            # Create event string
-            to_draw = (str(((item['event:startdate'].hour-1) % 12)+1) +
-                        ('' if item['event:startdate'].minute == 0 else (':'+str(item['event:startdate'].minute))) +
-                        '-' + str(((item['event:enddate'].hour-1) % 12)+1) +
-                        ('' if item['event:enddate'].minute == 0 else (':'+str(item['event:enddate'].minute))) +
-                        ('AM' if item['event:enddate'].hour < 12 else 'PM') +
-                        ' | ' + to_d)
-            # Use textwrap to make sure line doesn't exceed calendar day
-            for line in textwrap.wrap(to_draw, width=16):
-                draw.text((10+166*n, 225+20*m),line,colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other'],font=event)
-                # Increment line by 1 once written
-                m = m + 1
-    # Save finalized image
-    img.save(week_str + '.png')
-    return week_str + '.png', to_edit
+    y = {'advert': 'on', 'desc_on': None}
+    daily = {d_to_dt(datetime.timedelta(day) + start):
+        [{**item, **y} for item in feed if item['event:startdate'] <= d_to_dt(datetime.timedelta(day+1) + start) and item['event:enddate'] >= d_to_dt(datetime.timedelta(day) + start) and not item['isallday']] for day in range((last - start).days)}
+    y = {'advert': 'on'}
+    all_day = [{**item, **y} for item in feed if item['isallday']]
+    return {'daily': daily, 'all_day': all_day}
 
 @app.route('/images/<filename:re:.*\.png>')
 def send_image(filename):
     return static_file(filename, root='./', mimetype='image/png')
 
-@app.route('/index.html')
+@app.route('/css/<filename:re:.*\.css>')
+def send_image(filename):
+    return static_file(filename, root='./', mimetype='text/css')
+
+@app.route('/')
 def home():
-    with open("index.html") as page:
-        out = page.read()
-    return out
+    return templates['template'].format(body=templates['home'],home_act='class="active"',prt_act='',GT_act='',week_act='',end_act='')
 
-@app.route('/weekGT.html', method='GET')
+@app.route('/weekGT', method='GET')
 def weekGT():
-    with open("weekGT.html") as page:
-        out = page.read()
-    return out
+    return templates['template'].format(body=templates['weekGT'],home_act='',prt_act='',GT_act='class="active"',week_act='',end_act='').format(image='template.png',accordion='')
 
-@app.route('/weekGT.html', method='POST')
+@app.route('/weekGT', method='POST')
 def weekGT():
+    global cal_feed
     if request.POST.save:
         cal_feed = refresh_OrgSync()
         ask_week = {'This Week': -1, 'Next Week': 0, '2 Weeks Ahead': 1, '3 Weeks Ahead': 2}[request.POST.weekSel.strip()]
-        active_glance, editable = week_at_a_glance(cal_feed, ask_week)
-        with open("weekGT.html") as page:
-            out = page.read()
-        out = out.replace('<!-- Preview Here -->','<img class="img-responsive" src="/images/'+active_glance+'" alt="/images/template.png">')
+        active_glance, editable = cal_maker.week_at_a_glance(cal_feed, ask_week)
         accord = ''
-        n = 0
+        for event in cal_feed['all_day']:
+            if event['event:startdate'] < max(editable.keys()) and event['event:enddate'] >= min(editable.keys()):
+                anacc = templates['accordion_all_day'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(event['event:startdate'].month),day_=str(event['event:startdate'].day))
+                accord = accord + anacc
         for day in editable:
-            for event in editable[day]['All Day']:
-                anacc = temp.format(id=str(n),title=event['title'],month=str(day.month),day_=str(day.day),description='' if 'description' not in event else event['description'])
-                n = n + 1
+            for event in editable[day]:
+                anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(day.month),day_=str(day.day),description='' if 'description' not in event else event['description'])
                 accord = accord + anacc
-            for event in editable[day]['Short']:
-                anacc = temp.format(id=str(n),title=event['title'],month=str(day.month),day_=str(day.day),description='' if 'description' not in event else event['description'])
-                n = n + 1
-                accord = accord + anacc
-        out = out.replace('<!--Accordian Here-->','<div class="panel-group" id="accordion"><form action="/weekGT.html" method="POST">'+accord+
-            '<p></p><button type="submit" class="btn btn-default" name="save2" value="save2">Update</button></form></div>')
-        return out
+        return templates['template'].format(body=templates['weekGT'],home_act='',prt_act='',GT_act='class="active"',week_act='',end_act='').format(image=active_glance,accordion='''<div class="panel-group" id="accordion">
+    <form action="/weekGT" method="POST">'''+accord+
+            '''            <br>
+            <button type="submit" class="btn btn-default" name="save2" value="iii">Update</button>
+    </form>
+</div>''')
     elif request.POST.save2:
-        print(request.POST)
-        cal_feed = refresh_OrgSync()
-        active_glance, editable = week_at_a_glance(cal_feed, ask_week)
-        with open("weekGT.html") as page:
-            out = page.read()
-        out = out.replace('<!-- Preview Here -->','<img class="img-responsive" src="/images/'+active_glance+'" alt="/images/template.png">')
+        request.POST.pop('save2', None)
+        ids = set([key.split('-')[-1] for key in request.POST])
+        features = {id: {key.split('-')[0]: request.POST[key] for key in request.POST if key.split('-')[-1] == id} for id in ids}
+        for id in features:
+            comp = False
+            for event in cal_feed['all_day']:
+                if id == event['link'].split('/')[-1]:
+                    event['advert'] = 'on' if 'advert' in features[id] else 'off'
+                    event['title'] = features[id]['title']
+                    comp = True
+                    break
+            for day in cal_feed['daily']:
+                if comp:
+                    break
+                else:
+                    for event in cal_feed['daily'][day]:
+                        if id == event['link'].split('/')[-1]:
+                            event['advert'] = 'on' if 'advert' in features[id] else 'off'
+                            event['desc_on'] = 'on' if 'desc_on' in features[id] else 'off'
+                            event['title'] = features[id]['title']
+                            event['description'] = features[id]['description']
+                            break
+                            break
+        ask_week = 0
+        active_glance, editable = cal_maker.week_at_a_glance(cal_feed, ask_week)
         accord = ''
-        n = 0
+        for event in cal_feed['all_day']:
+            if event['event:startdate'] < max(editable.keys()) and event['event:enddate'] >= min(editable.keys()):
+                anacc = templates['accordion_all_day'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(event['event:startdate'].month),day_=str(event['event:startdate'].day))
+                accord = accord + anacc
         for day in editable:
-            for event in editable[day]['All Day']:
-                anacc = temp.format(id=str(n),title=event['title'],month=str(day.month),day_=str(day.day),description='' if 'description' not in event else event['description'])
-                n = n + 1
+            for event in editable[day]:
+                anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(day.month),day_=str(day.day),description='' if 'description' not in event else event['description'])
                 accord = accord + anacc
-            for event in editable[day]['Short']:
-                anacc = temp.format(id=str(n),title=event['title'],month=str(day.month),day_=str(day.day),description='' if 'description' not in event else event['description'])
-                n = n + 1
-                accord = accord + anacc
-        out = out.replace('<!--Accordian Here-->','<div class="panel-group" id="accordion"><form action="/weekGT.html" method="POST">'+accord+
-            '<p></p><button type="submit" class="btn btn-default" name="save2" value="save2">Update</button></form></div>')
-        return out
+        return templates['template'].format(body=templates['weekGT'],home_act='',prt_act='',GT_act='class="active"',week_act='',end_act='').format(image=active_glance,accordion='''<div class="panel-group" id="accordion">
+    <form action="/weekGT" method="POST">'''+accord+
+            '''            <br>
+            <button type="submit" class="btn btn-default" name="save2" value="iii">Update</button>
+    </form>
+</div>''')
     else:
-        with open("weekGT.html") as page:
-            out = page.read()
-        return out
+        return templates['template'].format(body=templates['weekGT'],home_act='',prt_act='',GT_act='class="active"',week_act='',end_act='').format(image='template.png',accordion='')
+
+@app.route('/weekFB', method='GET')
+def weekFB():
+    return templates['template'].format(body=templates['weekFB'],home_act='',prt_act='',GT_act='class="active"',week_act='',end_act='').format(image='week.png',accordion='')
+
+@app.route('/weekFB', method='POST')
+def weekFB():
+    global cal_feed
+    if request.POST.save:
+        cal_feed = refresh_OrgSync()
+        ask_week = {'This Week': -1, 'Next Week': 0, '2 Weeks Ahead': 1, '3 Weeks Ahead': 2}[request.POST.weekSel.strip()]
+        active_glance, editable = cal_maker.week_at_a_glance(cal_feed, ask_week)
+        accord = ''
+        for event in cal_feed['all_day']:
+            if event['event:startdate'] < max(editable.keys()) and event['event:enddate'] >= min(editable.keys()):
+                anacc = templates['accordion_all_day'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(event['event:startdate'].month),day_=str(event['event:startdate'].day))
+                accord = accord + anacc
+        for day in editable:
+            for event in editable[day]:
+                anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(day.month),day_=str(day.day),description='' if 'description' not in event else event['description'])
+                accord = accord + anacc
+        return templates['template'].format(body=templates['weekGT'],home_act='',prt_act='',GT_act='class="active"',week_act='',end_act='').format(image=active_glance,accordion='''<div class="panel-group" id="accordion">
+    <form action="/weekGT" method="POST">'''+accord+
+            '''            <br>
+            <button type="submit" class="btn btn-default" name="save2" value="iii">Update</button>
+    </form>
+</div>''')
+    elif request.POST.save2:
+        request.POST.pop('save2', None)
+        ids = set([key.split('-')[-1] for key in request.POST])
+        features = {id: {key.split('-')[0]: request.POST[key] for key in request.POST if key.split('-')[-1] == id} for id in ids}
+        for id in features:
+            comp = False
+            for event in cal_feed['all_day']:
+                if id == event['link'].split('/')[-1]:
+                    event['advert'] = 'on' if 'advert' in features[id] else 'off'
+                    event['title'] = features[id]['title']
+                    comp = True
+                    break
+            for day in cal_feed['daily']:
+                if comp:
+                    break
+                else:
+                    for event in cal_feed['daily'][day]:
+                        if id == event['link'].split('/')[-1]:
+                            event['advert'] = 'on' if 'advert' in features[id] else 'off'
+                            event['desc_on'] = 'on' if 'desc_on' in features[id] else 'off'
+                            event['title'] = features[id]['title']
+                            event['description'] = features[id]['description']
+                            break
+                            break
+        ask_week = 0
+        active_glance, editable = cal_maker.week_at_a_glance(cal_feed, ask_week)
+        accord = ''
+        for event in cal_feed['all_day']:
+            if event['event:startdate'] < max(editable.keys()) and event['event:enddate'] >= min(editable.keys()):
+                anacc = templates['accordion_all_day'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(event['event:startdate'].month),day_=str(event['event:startdate'].day))
+                accord = accord + anacc
+        for day in editable:
+            for event in editable[day]:
+                anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(day.month),day_=str(day.day),description='' if 'description' not in event else event['description'])
+                accord = accord + anacc
+        return templates['template'].format(body=templates['weekGT'],home_act='',prt_act='',GT_act='class="active"',week_act='',end_act='').format(image=active_glance,accordion='''<div class="panel-group" id="accordion">
+    <form action="/weekGT" method="POST">'''+accord+
+            '''            <br>
+            <button type="submit" class="btn btn-default" name="save2" value="iii">Update</button>
+    </form>
+</div>''')
+    else:
+        return templates['template'].format(body=templates['weekGT'],home_act='',prt_act='',GT_act='class="active"',week_act='',end_act='').format(image='template.png',accordion='')
 
 run(app, host='localhost', port=8080)
