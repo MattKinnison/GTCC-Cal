@@ -7,6 +7,8 @@ import pytz
 import textwrap
 import cal_maker
 import pprint as pp
+import ics
+import arrow
 
 app = Bottle()
 
@@ -18,6 +20,8 @@ def load_html(files):
         with open('html\\'+file+'.html') as f:
             templates[file] = f.read()
     return templates
+
+lit_cal = ics.Calendar(requests.get('http://www.universalis.com/vcalendar.ics').text)
 
 templates = load_html(['home','template','accordion','weekGT','accordion_all_day', 'weekFB'])
 
@@ -131,7 +135,7 @@ def weekGT():
 
 @app.route('/weekFB', method='GET')
 def weekFB():
-    return templates['template'].format(body=templates['weekFB'],home_act='',prt_act='',GT_act='class="active"',week_act='',end_act='').format(image='week.png',accordion='')
+    return templates['template'].format(body=templates['weekFB'],home_act='',prt_act='',GT_act='',week_act='class="active"',end_act='').format(image='week.png',accordion='')
 
 @app.route('/weekFB', method='POST')
 def weekFB():
@@ -139,7 +143,7 @@ def weekFB():
     if request.POST.save:
         cal_feed = refresh_OrgSync()
         ask_week = {'This Week': -1, 'Next Week': 0, '2 Weeks Ahead': 1, '3 Weeks Ahead': 2}[request.POST.weekSel.strip()]
-        active_glance, editable = cal_maker.week_at_a_glance(cal_feed, ask_week)
+        active_glance, editable = cal_maker.this_week_at_GTCC(cal_feed, ask_week)
         accord = ''
         for event in cal_feed['all_day']:
             if event['event:startdate'] < max(editable.keys()) and event['event:enddate'] >= min(editable.keys()):
@@ -149,8 +153,8 @@ def weekFB():
             for event in editable[day]:
                 anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(day.month),day_=str(day.day),description='' if 'description' not in event else event['description'])
                 accord = accord + anacc
-        return templates['template'].format(body=templates['weekGT'],home_act='',prt_act='',GT_act='class="active"',week_act='',end_act='').format(image=active_glance,accordion='''<div class="panel-group" id="accordion">
-    <form action="/weekGT" method="POST">'''+accord+
+        return templates['template'].format(body=templates['weekFB'],home_act='',prt_act='',GT_act='',week_act='class="active"',end_act='').format(image=active_glance,accordion='''<div class="panel-group" id="accordion">
+    <form action="/weekFB" method="POST">'''+accord+
             '''            <br>
             <button type="submit" class="btn btn-default" name="save2" value="iii">Update</button>
     </form>
@@ -180,7 +184,7 @@ def weekFB():
                             break
                             break
         ask_week = 0
-        active_glance, editable = cal_maker.week_at_a_glance(cal_feed, ask_week)
+        active_glance, editable = cal_maker.this_week_at_GTCC(cal_feed, ask_week)
         accord = ''
         for event in cal_feed['all_day']:
             if event['event:startdate'] < max(editable.keys()) and event['event:enddate'] >= min(editable.keys()):
@@ -190,13 +194,13 @@ def weekFB():
             for event in editable[day]:
                 anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(day.month),day_=str(day.day),description='' if 'description' not in event else event['description'])
                 accord = accord + anacc
-        return templates['template'].format(body=templates['weekGT'],home_act='',prt_act='',GT_act='class="active"',week_act='',end_act='').format(image=active_glance,accordion='''<div class="panel-group" id="accordion">
-    <form action="/weekGT" method="POST">'''+accord+
+        return templates['template'].format(body=templates['weekFB'],home_act='',prt_act='',GT_act='',week_act='class="active"',end_act='').format(image=active_glance,accordion='''<div class="panel-group" id="accordion">
+    <form action="/weekFB" method="POST">'''+accord+
             '''            <br>
             <button type="submit" class="btn btn-default" name="save2" value="iii">Update</button>
     </form>
 </div>''')
     else:
-        return templates['template'].format(body=templates['weekGT'],home_act='',prt_act='',GT_act='class="active"',week_act='',end_act='').format(image='template.png',accordion='')
+        return templates['template'].format(body=templates['weekFB'],home_act='',prt_act='',GT_act='',week_act='class="active"',end_act='').format(image='week.png',accordion='')
 
 run(app, host='localhost', port=8080)

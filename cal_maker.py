@@ -65,7 +65,7 @@ def week_at_a_glance(cal_feed, adj_week, start_time = datetime.date.today(), spe
                 months[(next_monday + datetime.timedelta(6)).month - 1] + ' ' +
                 str((next_monday + datetime.timedelta(6)).day))
     # Pull image from template
-    img = Image.open("week.png").convert('RGBA')
+    img = Image.open("template.png").convert('RGBA')
     draw = ImageDraw.Draw(img)
 
     # Initialize Fonts
@@ -129,7 +129,8 @@ def week_at_a_glance(cal_feed, adj_week, start_time = datetime.date.today(), spe
 
 def this_week_at_GTCC(cal_feed, adj_week, start_time = datetime.date.today(), spec_title = False):
     # Image constants
-    day_width = 166
+    day_width = 164
+    start_height = 115
     event_text_height = 20
     desc_text_height = 14
 
@@ -138,10 +139,10 @@ def this_week_at_GTCC(cal_feed, adj_week, start_time = datetime.date.today(), sp
     # Make title date range
     week_str = (months[next_monday.month - 1] + ' ' +
                 str(next_monday.day) + ' - ' +
-                months[(next_monday + datetime.timedelta(6)).month - 1] + ' ' +
-                str((next_monday + datetime.timedelta(6)).day))
+                months[(next_monday + datetime.timedelta(4)).month - 1] + ' ' +
+                str((next_monday + datetime.timedelta(4)).day))
     # Pull image from template
-    img = Image.open("template.png").convert('RGBA')
+    img = Image.open("week.png").convert('RGBA')
     draw = ImageDraw.Draw(img)
 
     # Initialize Fonts
@@ -151,16 +152,13 @@ def this_week_at_GTCC(cal_feed, adj_week, start_time = datetime.date.today(), sp
     event = ImageFont.truetype("Roboto-Regular.ttf", 16)
     desc = ImageFont.truetype("Roboto-Regular.ttf", 12)
 
-    # Draw Title
-    draw.text((10, 20),spec_title if spec_title else week_str,(255, 222, 118),font=title)
-
     to_edit = {}
     # Loop through the 7 days of the week
-    for n in range(7):
+    for n in range(5):
         # Increment days
         wr_day = next_monday + datetime.timedelta(n)
         # Draw calendar date onto calendar
-        draw.text((10+day_width*n, 200), str(wr_day.day), (0,0,0), font=day_font)
+        draw.text((5+day_width*n, 85), str(wr_day.day), (255,255,255), font=day_font)
         to_edit[wr_day] = []
         # mth row to write text on
         m = 0
@@ -171,9 +169,9 @@ def this_week_at_GTCC(cal_feed, adj_week, start_time = datetime.date.today(), sp
                 to_draw = item['title']
                 # Use textwrap to make sure line doesn't exceed calendar day
                 for line in textwrap.wrap(to_draw, width=19):
-                    draw.line([(day_width*n,233+event_text_height*m),(day_width*(n+1),233+event_text_height*m)],fill=colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other'],width=event_text_height)
+                    draw.line([(day_width*n,start_height+event_text_height*(m+0.5)),(day_width*(n+1),start_height+event_text_height*(m+0.5))],fill=colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other'],width=event_text_height)
                     if wr_day.weekday() == 0 or not (item['event:startdate'] < wr_day):
-                        draw.text((10+day_width*n, 225+event_text_height*m),line,(255,255,255),font=all_day)
+                        draw.text((5+day_width*n, start_height+event_text_height*m),line,(255,255,255),font=all_day)
                     #o = draw.textsize(line,font=event)[0]
                     m = m + 1
         m1 = 0
@@ -189,15 +187,15 @@ def this_week_at_GTCC(cal_feed, adj_week, start_time = datetime.date.today(), sp
                     to_draw = make_date(item) + to_d
                     # Use textwrap to make sure line doesn't exceed calendar day
                     for line in textwrap.wrap(to_draw, width=19):
-                        draw.text((10+day_width*n, 225+event_text_height*m+desc_text_height*m1),line,colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other'],font=event)
+                        draw.text((5+day_width*n, start_height+event_text_height*m+desc_text_height*m1),line,colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other'],font=event)
                         # Increment line by 1 once written
                         m = m + 1
                     if 'desc_on' in item and item['desc_on'] == 'on' and item['description']:
                         lines = textwrap.wrap(item['description'], width=22)
-                        draw.rectangle([(10+day_width*n,225+event_text_height*m+desc_text_height*m1),(150+day_width*n,225+event_text_height*m+desc_text_height*(m1+len(lines)))],fill=lighten(colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other']), outline=(0,0,0))
+                        draw.rectangle([(5+day_width*n,start_height+event_text_height*m+desc_text_height*m1),(150+day_width*n,start_height+event_text_height*m+desc_text_height*(m1+len(lines)))],fill=lighten(colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other']), outline=(0,0,0))
                         for line in lines:
                             (w, h) = draw.textsize(line,font=desc)
-                            draw.text((10+day_width*n+(140-w)/2, 225+event_text_height*m+desc_text_height*m1),line,(0,0,0),font=desc)
+                            draw.text((10+day_width*n+(140-w)/2, start_height+event_text_height*m+desc_text_height*m1),line,(0,0,0),font=desc)
                             m1 = m1 + 1
     # Save finalized image
     img.save(week_str + '.png')
