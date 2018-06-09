@@ -7,8 +7,6 @@ import pytz
 import textwrap
 import cal_maker
 import pprint as pp
-import ics
-import arrow
 
 app = Bottle()
 
@@ -20,8 +18,6 @@ def load_html(files):
         with open('html\\'+file+'.html') as f:
             templates[file] = f.read()
     return templates
-
-lit_cal = ics.Calendar(requests.get('http://www.universalis.com/vcalendar.ics').text)
 
 templates = load_html(['home','template','accordion','weekGT','accordion_all_day', 'weekFB'])
 

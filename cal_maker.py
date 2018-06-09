@@ -3,10 +3,17 @@ import datetime
 import dateutil.parser
 import pytz
 import textwrap
+import ics
+import arrow
+import requests
+import re
+import random
 
 eastern = pytz.timezone('US/Eastern')
 
 months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+lit_cal = ics.Calendar(requests.get('http://www.universalis.com/vcalendar.ics').text.encode('latin-1').decode('utf-8')).events
 
 # Set Category colors
 colors = {  "Faith Formation": (136,40,136),
@@ -20,7 +27,7 @@ colors = {  "Faith Formation": (136,40,136),
             "Other": (0,0,0)
           }
 
-gt_order = {  "Faith Formation": 4,
+gt_order = {"Faith Formation": 4,
             "Community Life": 5,
             "Freshmen Events": 5,
             "Liturgy": 1,
@@ -33,6 +40,73 @@ gt_order = {  "Faith Formation": 4,
 
 def d_to_dt(d):
     return eastern.localize(datetime.datetime.combine(d,datetime.time.min))
+
+def is_interesting(event):
+    if 'Saint' in event:
+        return True
+    if 'Sunday' in event:
+        return True
+    elif 'Ordinary Time' in event:
+        return False
+    elif 'Lent' in event:
+        return False
+    elif 'Advent' in event:
+        return False
+    elif 'after' in event:
+        return False
+    elif 'of Easter' in event:
+        return False
+    elif 'of Christmas' in event:
+        return False
+    elif 'January' in event:
+        return False
+    elif 'December' in event:
+        return False
+    elif'Saturday memorial' in event:
+        return False
+    else:
+        return True
+
+def is_not_title(word):
+    if 'First' in word:
+        return True
+    elif 'Mary' in word:
+        return True
+    elif 'Corpus' in word:
+        return True
+    elif 'Priest' in word:
+        return False
+    elif 'Virgin' in word:
+        return False
+    elif 'Pope' in word:
+        return False
+    elif 'Bishop' in word:
+        return False
+    elif 'Martyr' in word:
+        return False
+    elif 'Religious' in word:
+        return False
+    elif 'Doctor' in word:
+        return False
+    elif 'Abbot' in word:
+        return False
+    elif 'Apostle' in word:
+        return False
+    elif 'Evangelist' in word:
+        return False
+    elif 'Deacon' in word:
+        return False
+    else:
+        return True
+
+def get_saints_day(wr_day, lit_cal):
+    day_string = [holy_day.name for holy_day in lit_cal if holy_day.begin.date() == wr_day.date()][0]
+    day_events = [event for event in re.split(',\n or |,\n \(commemoration of ',day_string) if is_interesting(event)]
+    if day_events:
+        word = ' '.join([word.strip() for word in random.choice(day_events).split(', ') if is_not_title(word)])
+        return word if word[-1] != ')' and '(' not in word else word[:-1]
+    else:
+        return ''
 
 def next_weekday(d, weekday): # 0 = Monday, 1=Tuesday, 2=Wednesday...
     days_ahead = weekday - d.weekday()
@@ -84,7 +158,12 @@ def week_at_a_glance(cal_feed, adj_week, start_time = datetime.date.today(), spe
         # Increment days
         wr_day = next_monday + datetime.timedelta(n)
         # Draw calendar date onto calendar
-        draw.text((10+day_width*n, 200), str(wr_day.day), (0,0,0), font=day_font)
+        draw.text((10+day_width*n, 198), str(wr_day.day), (0,0,0), font=day_font)
+        holy_day = get_saints_day(wr_day, lit_cal)
+        m = 0
+        for line in textwrap.wrap(holy_day, width=20):
+            draw.text((40+day_width*n, 198+12*m), line, (0,0,0), font=desc)
+            m = m + 1
         to_edit[wr_day] = []
         # mth row to write text on
         m = 0
@@ -95,9 +174,9 @@ def week_at_a_glance(cal_feed, adj_week, start_time = datetime.date.today(), spe
                 to_draw = item['title']
                 # Use textwrap to make sure line doesn't exceed calendar day
                 for line in textwrap.wrap(to_draw, width=19):
-                    draw.line([(day_width*n,233+event_text_height*m),(day_width*(n+1),233+event_text_height*m)],fill=colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other'],width=event_text_height)
+                    draw.line([(day_width*n,238+event_text_height*m),(day_width*(n+1),238+event_text_height*m)],fill=colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other'],width=event_text_height)
                     if wr_day.weekday() == 0 or not (item['event:startdate'] < wr_day):
-                        draw.text((10+day_width*n, 225+event_text_height*m),line,(255,255,255),font=all_day)
+                        draw.text((10+day_width*n, 230+event_text_height*m),line,(255,255,255),font=all_day)
                     #o = draw.textsize(line,font=event)[0]
                     m = m + 1
         m1 = 0
@@ -113,15 +192,15 @@ def week_at_a_glance(cal_feed, adj_week, start_time = datetime.date.today(), spe
                     to_draw = make_date(item) + to_d
                     # Use textwrap to make sure line doesn't exceed calendar day
                     for line in textwrap.wrap(to_draw, width=19):
-                        draw.text((10+day_width*n, 225+event_text_height*m+desc_text_height*m1),line,colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other'],font=event)
+                        draw.text((10+day_width*n, 230+event_text_height*m+desc_text_height*m1),line,colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other'],font=event)
                         # Increment line by 1 once written
                         m = m + 1
                     if 'desc_on' in item and item['desc_on'] == 'on' and item['description']:
                         lines = textwrap.wrap(item['description'], width=22)
-                        draw.rectangle([(10+day_width*n,225+event_text_height*m+desc_text_height*m1),(150+day_width*n,225+event_text_height*m+desc_text_height*(m1+len(lines)))],fill=lighten(colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other']), outline=(0,0,0))
+                        draw.rectangle([(10+day_width*n,230+event_text_height*m+desc_text_height*m1),(150+day_width*n,230+event_text_height*m+desc_text_height*(m1+len(lines)))],fill=lighten(colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other']), outline=(0,0,0))
                         for line in lines:
                             (w, h) = draw.textsize(line,font=desc)
-                            draw.text((10+day_width*n+(140-w)/2, 225+event_text_height*m+desc_text_height*m1),line,(0,0,0),font=desc)
+                            draw.text((10+day_width*n+(140-w)/2, 230+event_text_height*m+desc_text_height*m1),line,(0,0,0),font=desc)
                             m1 = m1 + 1
     # Save finalized image
     img.save(week_str + '.png')
