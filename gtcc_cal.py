@@ -20,7 +20,7 @@ def load_html(files):
             templates[file] = f.read()
     return templates
 
-templates = load_html(['home','template','accordion','weekGT', 'weekFB'])
+templates = load_html(['home','template','accordion','weekGT', 'weekFB', 'weekend'])
 
 cal_feed = {}
 
@@ -152,7 +152,7 @@ def weekFB():
                 anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(day.month),day_=str(day.day),description='' if 'description' not in event else event['description'])
                 accord = accord + anacc
         return templates['template'].format(body=templates['weekFB'],home_act='',prt_act='',GT_act='',week_act='class="active"',end_act='').format(image=active_glance,accordion='''<div class="panel-group" id="accordion">
-    <form action="/weekFB" method="POST"><input type="hidden"  name="ask_week" value="'''+str(ask_week)+'''"/>'''+accord+
+    <form action="/weekFB" method="POST"><input type="hidden" name="ask_week" value="'''+str(ask_week)+'''"/>'''+accord+
             '''            <br>
             <button type="submit" class="btn btn-default" name="save2" value="iii">Update</button>
     </form>
@@ -184,7 +184,6 @@ def weekFB():
                             event['description'] = features[id]['description']
                             break
                             break
-        ask_week = 0
         active_glance, editable = cal_maker.this_week_at_GTCC(cal_feed, ask_week)
         accord = ''
         for event in cal_feed['all_day']:
@@ -203,6 +202,78 @@ def weekFB():
 </div>''')
     else:
         return templates['template'].format(body=templates['weekFB'],home_act='',prt_act='',GT_act='',week_act='class="active"',end_act='').format(image='week.png',accordion='')
+
+@app.route('/weekend', method='GET')
+def weekend():
+    return templates['template'].format(body=templates['weekend'],home_act='',prt_act='',GT_act='',week_act='class="active"',end_act='').format(image='weekend.png',accordion='')
+
+@app.route('/weekend', method='POST')
+def weekend():
+    global cal_feed
+    if request.POST.save:
+        cal_feed = refresh_OrgSync()
+        ask_week = {'This Week': -1, 'Next Week': 0, '2 Weeks Ahead': 1, '3 Weeks Ahead': 2}[request.POST.weekSel.strip()]
+        active_glance, editable = cal_maker.this_weekend_at_GTCC(cal_feed, ask_week)
+        accord = ''
+        for event in cal_feed['all_day']:
+            if event['event:startdate'] < max(editable.keys()) and event['event:enddate'] >= min(editable.keys()):
+                anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(event['event:startdate'].month),day_=str(event['event:startdate'].day),description='' if 'description' not in event else event['description'])
+                accord = accord + anacc
+        for day in editable:
+            for event in editable[day]:
+                anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(day.month),day_=str(day.day),description='' if 'description' not in event else event['description'])
+                accord = accord + anacc
+        return templates['template'].format(body=templates['weekend'],home_act='',prt_act='',GT_act='',week_act='class="active"',end_act='').format(image=active_glance,accordion='''<div class="panel-group" id="accordion">
+    <form action="/weekend" method="POST"><input type="hidden" name="ask_week" value="'''+str(ask_week)+'''"/>'''+accord+
+            '''            <br>
+            <button type="submit" class="btn btn-default" name="save2" value="iii">Update</button>
+    </form>
+</div>''')
+    elif request.POST.save2:
+        request.POST.pop('save2', None)
+        ask_week = int(request.POST.pop('ask_week'))
+        ids = set([key.split('-')[-1] for key in request.POST])
+        features = {id: {key.split('-')[0]: request.POST[key] for key in request.POST if key.split('-')[-1] == id} for id in ids}
+        for id in features:
+            comp = False
+            for event in cal_feed['all_day']:
+                if id == event['link'].split('/')[-1]:
+                    event['advert'] = 'on' if 'advert' in features[id] else 'off'
+                    event['desc_on'] = 'on' if 'desc_on' in features[id] else 'off'
+                    event['title'] = features[id]['title']
+                    event['description'] = features[id]['description']
+                    comp = True
+                    break
+            for day in cal_feed['daily']:
+                if comp:
+                    break
+                else:
+                    for event in cal_feed['daily'][day]:
+                        if id == event['link'].split('/')[-1]:
+                            event['advert'] = 'on' if 'advert' in features[id] else 'off'
+                            event['desc_on'] = 'on' if 'desc_on' in features[id] else 'off'
+                            event['title'] = features[id]['title']
+                            event['description'] = features[id]['description']
+                            break
+                            break
+        active_glance, editable = cal_maker.this_weekend_at_GTCC(cal_feed, ask_week)
+        accord = ''
+        for event in cal_feed['all_day']:
+            if event['event:startdate'] < max(editable.keys()) and event['event:enddate'] >= min(editable.keys()):
+                anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(event['event:startdate'].month),day_=str(event['event:startdate'].day),description='' if 'description' not in event else event['description'])
+                accord = accord + anacc
+        for day in editable:
+            for event in editable[day]:
+                anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(day.month),day_=str(day.day),description='' if 'description' not in event else event['description'])
+                accord = accord + anacc
+        return templates['template'].format(body=templates['weekend'],home_act='',prt_act='',GT_act='',week_act='class="active"',end_act='').format(image=active_glance,accordion='''<div class="panel-group" id="accordion">
+    <form action="/weekend" method="POST"><input type="hidden"  name="ask_week" value="'''+str(ask_week)+'''"/>'''+accord+
+            '''            <br>
+            <button type="submit" class="btn btn-default" name="save2" value="iii">Update</button>
+    </form>
+</div>''')
+    else:
+        return templates['template'].format(body=templates['weekend'],home_act='',prt_act='',GT_act='',week_act='class="active"',end_act='').format(image='weekend.png',accordion='')
 
 webbrowser.open('http://localhost:8080',new=2)
 run(app, host='localhost', port=8080)

@@ -119,35 +119,64 @@ def lighten(color):
 
 def make_date(item):
     return (str(((item['event:startdate'].hour-1) % 12)+1) +
-                ('' if item['event:startdate'].minute == 0 else (':'+str(item['event:startdate'].minute))) +
+                ('' if item['event:startdate'].minute == 0 else (':'+str(item['event:startdate'].minute).zfill(2))) +
+                (('AM' if item['event:startdate'].hour < 12 else 'PM') if ('AM' if item['event:startdate'].hour < 12 else 'PM') != ('AM' if item['event:enddate'].hour < 12 else 'PM') else '') +
                 '-' + str(((item['event:enddate'].hour-1) % 12)+1) +
-                ('' if item['event:enddate'].minute == 0 else (':'+str(item['event:enddate'].minute))) +
+                ('' if item['event:enddate'].minute == 0 else (':'+str(item['event:enddate'].minute).zfill(2))) +
                 ('AM' if item['event:enddate'].hour < 12 else 'PM') +
                 ' | ')
 
-def round_corner(radius, fill):
-    """Draw a round corner"""
-    corner = Image.new('RGBA', (radius, radius), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(corner)
-    draw.pieslice((0, 0, radius * 2, radius * 2), 180, 270, fill=fill)
-    return corner
+def draw_desc(draw, item, n, px, wr_day, offset, bar_width, day_width, event_start_height, event_text_height, desc_text_height, desc, desc_width):
+    if 'desc_on' in item and item['desc_on'] == 'on' and item['description'] and wr_day - item['event:startdate'] < datetime.timedelta(1):
+        px = px + offset
+        lines = [l2 for l1 in item['description'].split('\n') for l2 in textwrap.wrap(l1, width=desc_width, drop_whitespace=False)]
+        draw.rectangle([(offset+(day_width+bar_width)*n,event_start_height+px),((day_width+bar_width)*(n)+day_width-1-offset,event_start_height+desc_text_height*len(lines)+px)],fill=lighten(colors.get(item['event:type'], 'black')))
+        for line in lines:
+            (w, h) = draw.textsize(line,font=desc)
+            draw.text(((day_width+bar_width)*n+(day_width-1-w)/2, event_start_height+px),line,'black',font=desc)
+            px = px + desc_text_height
+        px = px + offset
+    return px
 
-def round_rectangle(size, radius, fill):
-    """Draw a rounded rectangle"""
-    width, height = size
-    rectangle = Image.new('RGBA', size, fill)
-    corner = round_corner(radius, fill)
-    rectangle.paste(corner, (0, 0))
-    rectangle.paste(corner.rotate(90), (0, height - radius)) # Rotate the corner and paste it
-    rectangle.paste(corner.rotate(180), (width - radius, height - radius))
-    rectangle.paste(corner.rotate(270), (width - radius, 0))
-    return rectangle
+def draw_event(draw, item, n, px, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width):
+    if item['advert'] == 'on' and ((not item['isallday']) or (item['event:startdate'] < wr_day + datetime.timedelta(1) and item['event:enddate'] >= wr_day)):
+        # Create event string
+        to_draw = ('' if item['isallday'] else make_date(item)) + item['title']
+        # Use textwrap to make sure line doesn't exceed calendar day
+        for line in textwrap.wrap(to_draw, width=text_width):
+            if item['isallday']:
+                draw.line([((day_width+bar_width)*n,event_start_height+event_text_size/2+px), ((day_width+bar_width)*n+day_width+(0 if item['event:enddate'] - datetime.timedelta(1) <= wr_day else bar_width)-1,event_start_height+event_text_size/2+px)], fill=colors.get(item['event:type'], 'black'), width=event_text_height)
+                if wr_day.weekday() == 0 or item['event:startdate'] >= wr_day:
+                    draw.text((offset+(day_width+bar_width)*n, event_start_height+px),line,'white',font=all_day)
+            else:
+                draw.text((offset+(day_width+bar_width)*n, event_start_height+px),line,colors.get(item['event:type'], 'black'),font=event)
+            px = px + event_text_height
+        return draw_desc(draw, item, n, px, wr_day, offset, bar_width, day_width, event_start_height, event_text_height, desc_text_height, desc, desc_width)
+    else:
+        return px
+
+def populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width, px = 0):
+    to_edit = []
+    # Iterate through the OrgSync Feed
+    for item in cal_feed['all_day']:
+        px = draw_event(draw, item, n, px, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width)
+    for item in cal_feed['daily'][wr_day]:
+        to_edit.append(item)
+        px = draw_event(draw, item, n, px, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width)
+    return to_edit
 
 def week_at_a_glance(cal_feed, adj_week, start_time = datetime.date.today(), spec_title = False):
     # Image constants
-    day_width = 166
-    event_text_height = 20
-    desc_text_height = 14
+    day_width = 160
+    bar_width = day_width/40
+    offset = day_width/20
+    event_text_size = 16
+    text_width = 19
+    desc_text_size = 12
+    desc_width = 23
+    event_text_height = round(1.25*event_text_size)
+    desc_text_height = round(1.25*desc_text_size)
+    event_start_height = 230
 
     # Get Monday after start_time at midnight
     next_monday = d_to_dt(next_weekday(start_time+datetime.timedelta(adj_week*7), 0))
@@ -157,18 +186,18 @@ def week_at_a_glance(cal_feed, adj_week, start_time = datetime.date.today(), spe
                 months[(next_monday + datetime.timedelta(6)).month - 1] + ' ' +
                 str((next_monday + datetime.timedelta(6)).day))
     # Pull image from template
-    img = Image.open("template.png").convert('RGBA')
+    img = Image.open("glance.png").convert('RGBA')
     draw = ImageDraw.Draw(img)
 
     # Initialize Fonts
     title = ImageFont.truetype("Carme-Regular.ttf", 88)
     day_font = ImageFont.truetype("Roboto-Black.ttf", 22)
-    all_day = ImageFont.truetype("Roboto-Bold.ttf", 16)
-    event = ImageFont.truetype("Roboto-Regular.ttf", 16)
-    desc = ImageFont.truetype("Roboto-Regular.ttf", 12)
+    all_day = ImageFont.truetype("Roboto-Bold.ttf", event_text_size)
+    event = ImageFont.truetype("Roboto-Regular.ttf", event_text_size)
+    desc = ImageFont.truetype("Roboto-Regular.ttf", desc_text_size)
 
     # Draw Title
-    draw.text((10, 20),spec_title if spec_title else week_str,(255, 222, 118),font=title)
+    draw.text((offset, 20),spec_title if spec_title else week_str,(255, 222, 118),font=title)
 
     to_edit = {}
     # Loop through the 7 days of the week
@@ -176,69 +205,28 @@ def week_at_a_glance(cal_feed, adj_week, start_time = datetime.date.today(), spe
         # Increment days
         wr_day = next_monday + datetime.timedelta(n)
         # Draw calendar date onto calendar
-        draw.text((10+day_width*n, 198), str(wr_day.day), (0,0,0), font=day_font)
+        draw.text((offset+(day_width+bar_width)*n, 198), str(wr_day.day), (0,0,0), font=day_font)
+        # Draw Saint day onto calendar (max 2 lines)
         lines = textwrap.wrap(get_saints_day(wr_day, lit_cal), width=20)
-        m = 0
-        for ndx, line in enumerate(lines):
-            draw.text((40+day_width*n, 198+12*m), line + ('...' if ndx == 1 and len(lines) > 2 else ''), (0,0,0), font=desc)
-            if ndx == 1 and len(line) > 2:
-                break
-            m = m + 1
-        to_edit[wr_day] = []
-        # mth row to write text on
-        m = 0
-        # Iterate through the OrgSync Feed
-        m1 = 0
-        for item in cal_feed['all_day']:
-            if item['advert'] == 'on' and item['event:startdate'] < wr_day + datetime.timedelta(1) and item['event:enddate'] >= wr_day:
-                # Create event string
-                to_draw = item['title']
-                # Use textwrap to make sure line doesn't exceed calendar day
-                for line in textwrap.wrap(to_draw, width=19):
-                    draw.line([(day_width*n,238+event_text_height*m),(day_width*(n+1),238+event_text_height*m)],fill=colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other'],width=event_text_height)
-                    if wr_day.weekday() == 0 or not (item['event:startdate'] < wr_day):
-                        draw.text((10+day_width*n, 230+event_text_height*m),line,(255,255,255),font=all_day)
-                    #o = draw.textsize(line,font=event)[0]
-                    m = m + 1
-                if 'desc_on' in item and item['desc_on'] == 'on' and item['description'] and wr_day - item['event:startdate'] < datetime.timedelta(1):
-                    lines = textwrap.wrap(item['description'], width=22)
-                    draw.rectangle([(10+day_width*n,230+event_text_height*m+desc_text_height*m1),(150+day_width*n,230+event_text_height*m+desc_text_height*(m1+len(lines)))],fill=lighten(colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other']))
-                    for line in lines:
-                        (w, h) = draw.textsize(line,font=desc)
-                        draw.text((10+day_width*n+(140-w)/2, 230+event_text_height*m+desc_text_height*m1),line,(0,0,0),font=desc)
-                        m1 = m1 + 1
-        if wr_day in cal_feed['daily']:
-            for item in cal_feed['daily'][wr_day]:
-                to_edit[wr_day].append(item)
-                if item['advert'] == 'on':
-                    if 'Apologetics' in item['title'] or 'Theology of the Body' in item['title'] or 'Scripture Study' in item['title']:
-                        to_d = (item['title'].split(':')[0])
-                    else:
-                        to_d = item['title']
-                    # Create event string
-                    to_draw = make_date(item) + to_d
-                    # Use textwrap to make sure line doesn't exceed calendar day
-                    for line in textwrap.wrap(to_draw, width=19):
-                        draw.text((10+day_width*n, 230+event_text_height*m+desc_text_height*m1),line,colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other'],font=event)
-                        # Increment line by 1 once written
-                        m = m + 1
-                    if 'desc_on' in item and item['desc_on'] == 'on' and item['description']:
-                        lines = textwrap.wrap(item['description'], width=22)
-                        draw.rectangle([(10+day_width*n,230+event_text_height*m+desc_text_height*m1),(150+day_width*n,230+event_text_height*m+desc_text_height*(m1+len(lines)))],fill=lighten(colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other']))
-                        for line in lines:
-                            (w, h) = draw.textsize(line,font=desc)
-                            draw.text((10+day_width*n+(140-w)/2, 230+event_text_height*m+desc_text_height*m1),line,(0,0,0),font=desc)
-                            m1 = m1 + 1
+        for ndx, line in enumerate(lines[:2]):
+            draw.text((offset+30+(day_width+bar_width)*n, 198+desc_text_size*ndx), line + ('...' if ndx == 1 and len(lines) > 2 else ''), 'black', font=desc)
+        to_edit[wr_day] = populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width)
     # Save finalized image
     img.save(week_str + '.png')
     return week_str + '.png', to_edit
 
 def this_week_at_GTCC(cal_feed, adj_week, start_time = datetime.date.today(), spec_title = False):
     # Image constants
-    day_width = 164
-    start_height = 115
-    event_text_height = 20
-    desc_text_height = 14
+    day_width = 160
+    bar_width = day_width/40
+    offset = day_width/20
+    event_text_size = 16
+    text_width = 19
+    desc_text_size = 12
+    desc_width = 23
+    event_text_height = round(1.25*event_text_size)
+    desc_text_height = round(1.25*desc_text_size)
+    event_start_height = 130
 
     # Get Monday after start_time at midnight
     next_monday = d_to_dt(next_weekday(start_time+datetime.timedelta(adj_week*7), 0))
@@ -252,11 +240,11 @@ def this_week_at_GTCC(cal_feed, adj_week, start_time = datetime.date.today(), sp
     draw = ImageDraw.Draw(img)
 
     # Initialize Fonts
-    title = ImageFont.truetype("Carme-Regular.ttf", 88)
-    day_font = ImageFont.truetype("Roboto-Black.ttf", 22)
-    all_day = ImageFont.truetype("Roboto-Bold.ttf", 16)
-    event = ImageFont.truetype("Roboto-Regular.ttf", 16)
-    desc = ImageFont.truetype("Roboto-Regular.ttf", 12)
+    all_day = ImageFont.truetype("Roboto-Bold.ttf", event_text_size)
+    event = ImageFont.truetype("Roboto-Regular.ttf", event_text_size)
+    desc = ImageFont.truetype("Roboto-Regular.ttf", desc_text_size)
+
+    dofw = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY']
 
     to_edit = {}
     # Loop through the 7 days of the week
@@ -264,45 +252,68 @@ def this_week_at_GTCC(cal_feed, adj_week, start_time = datetime.date.today(), sp
         # Increment days
         wr_day = next_monday + datetime.timedelta(n)
         # Draw calendar date onto calendar
-        draw.text((5+day_width*n, 85), str(wr_day.day), (255,255,255), font=day_font)
-        to_edit[wr_day] = []
-        # mth row to write text on
-        m = 0
-        # Iterate through the OrgSync Feed
-        for item in cal_feed['all_day']:
-            if item['advert'] == 'on' and item['event:startdate'] < wr_day + datetime.timedelta(1) and item['event:enddate'] >= wr_day:
-                # Create event string
-                to_draw = item['title']
-                # Use textwrap to make sure line doesn't exceed calendar day
-                for line in textwrap.wrap(to_draw, width=19):
-                    draw.line([(day_width*n,start_height+event_text_height*(m+0.5)),(day_width*(n+1),start_height+event_text_height*(m+0.5))],fill=colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other'],width=event_text_height)
-                    if wr_day.weekday() == 0 or not (item['event:startdate'] < wr_day):
-                        draw.text((5+day_width*n, start_height+event_text_height*m),line,(255,255,255),font=all_day)
-                    #o = draw.textsize(line,font=event)[0]
-                    m = m + 1
-        m1 = 0
-        if wr_day in cal_feed['daily']:
-            for item in cal_feed['daily'][wr_day]:
-                to_edit[wr_day].append(item)
-                if item['advert'] == 'on':
-                    if 'Apologetics' in item['title'] or 'Theology of the Body' in item['title'] or 'Scripture Study' in item['title']:
-                        to_d = (item['title'].split(':')[0])
-                    else:
-                        to_d = item['title']
-                    # Create event string
-                    to_draw = make_date(item) + to_d
-                    # Use textwrap to make sure line doesn't exceed calendar day
-                    for line in textwrap.wrap(to_draw, width=19):
-                        draw.text((5+day_width*n, start_height+event_text_height*m+desc_text_height*m1),line,colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other'],font=event)
-                        # Increment line by 1 once written
-                        m = m + 1
-                    if 'desc_on' in item and item['desc_on'] == 'on' and item['description']:
-                        lines = textwrap.wrap(item['description'], width=22)
-                        draw.rectangle([(5+day_width*n,start_height+event_text_height*m+desc_text_height*m1),(150+day_width*n,start_height+event_text_height*m+desc_text_height*(m1+len(lines)))],fill=lighten(colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other']))
-                        for line in lines:
-                            (w, h) = draw.textsize(line,font=desc)
-                            draw.text((10+day_width*n+(140-w)/2, start_height+event_text_height*m+desc_text_height*m1),line,(0,0,0),font=desc)
-                            m1 = m1 + 1
+        day_string = dofw[n] + ' ' + str(wr_day.month) + '.' + str(wr_day.day)
+        (w, h) = draw.textsize(day_string,font=event)
+        draw.text(((day_width+bar_width)*n+(day_width-1-w)/2, 80), day_string, 'white', font=event)
+        # Draw Saint day onto calendar (max 2 lines)
+        lines = textwrap.wrap(get_saints_day(wr_day, lit_cal), width=25)
+        if lines:
+            draw.rectangle([(n*(day_width+bar_width),106),(n*(day_width+bar_width)+day_width-1,125)], fill=(255, 222, 118))
+            (w, h) = draw.textsize(lines[0] + ('...' if len(lines) > 1 else ''),font=desc)
+            draw.text(((day_width+bar_width)*n+(day_width-1-w)/2, event_start_height-22), lines[0] + ('...' if len(lines) > 1 else ''), 'black', font=desc)
+        to_edit[wr_day] = populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width)
+    # Save finalized image
+    img.save(week_str + '.png')
+    return week_str + '.png', to_edit
+
+def this_weekend_at_GTCC(cal_feed, adj_week, start_time = datetime.date.today(), spec_title = False):
+    # Image constants
+    day_width = 320
+    bar_width = day_width/40
+    offset = day_width/20
+    event_text_size = 24
+    text_width = 26
+    desc_text_size = 18
+    desc_width = 33
+    event_text_height = round(1.25*event_text_size)
+    desc_text_height = round(1.25*desc_text_size)
+    event_start_height = 172
+
+    # Get Monday after start_time at midnight
+    next_friday = d_to_dt(next_weekday(start_time+datetime.timedelta(adj_week*7), 4))
+    # Make title date range
+    week_str = (months[next_friday.month - 1] + ' ' +
+                str(next_friday.day) + ' - ' +
+                months[(next_friday + datetime.timedelta(2)).month - 1] + ' ' +
+                str((next_friday + datetime.timedelta(2)).day))
+    # Pull image from template
+    img = Image.open("weekend.png").convert('RGBA')
+    draw = ImageDraw.Draw(img)
+
+    # Initialize Fonts
+    day_font = ImageFont.truetype("Roboto-Regular.ttf", 32)
+    all_day = ImageFont.truetype("Roboto-Bold.ttf", event_text_size)
+    event = ImageFont.truetype("Roboto-Regular.ttf", event_text_size)
+    desc = ImageFont.truetype("Roboto-Regular.ttf", desc_text_size)
+
+    dofw = ['FRIDAY', 'SATURDAY', 'SUNDAY']
+
+    to_edit = {}
+    # Loop through the 7 days of the week
+    for n in range(3):
+        # Increment days
+        wr_day = next_friday + datetime.timedelta(n)
+        # Draw calendar date onto calendar
+        day_string = dofw[n] + ' ' + str(wr_day.month) + '.' + str(wr_day.day)
+        (w, h) = draw.textsize(day_string,font=day_font)
+        draw.text(((day_width+bar_width)*n+(day_width-1-w)/2, 95), day_string, 'white', font=day_font)
+        # Draw Saint day onto calendar (max 2 lines)
+        lines = textwrap.wrap(get_saints_day(wr_day, lit_cal), width=36)
+        if lines:
+            draw.rectangle([(n*(day_width+bar_width),134),(n*(day_width+bar_width)+day_width-1,172)], fill=(255, 222, 118))
+            (w, h) = draw.textsize(lines[0] + ('...' if len(lines) > 1 else ''),font=desc)
+            draw.text(((day_width+bar_width)*n+(day_width-1-w)/2, event_start_height-30), lines[0] + ('...' if len(lines) > 1 else ''), 'black', font=desc)
+        to_edit[wr_day] = populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width, px = offset)
     # Save finalized image
     img.save(week_str + '.png')
     return week_str + '.png', to_edit
