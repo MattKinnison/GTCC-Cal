@@ -115,7 +115,7 @@ def next_weekday(d, weekday): # 0 = Monday, 1=Tuesday, 2=Wednesday...
     return d + datetime.timedelta(days_ahead)
 
 def lighten(color):
-    return tuple(list(color)+[178])
+    return tuple(list(color)+[125])
 
 def make_date(item):
     return (str(((item['event:startdate'].hour-1) % 12)+1) +
@@ -124,6 +124,24 @@ def make_date(item):
                 ('' if item['event:enddate'].minute == 0 else (':'+str(item['event:enddate'].minute))) +
                 ('AM' if item['event:enddate'].hour < 12 else 'PM') +
                 ' | ')
+
+def round_corner(radius, fill):
+    """Draw a round corner"""
+    corner = Image.new('RGBA', (radius, radius), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(corner)
+    draw.pieslice((0, 0, radius * 2, radius * 2), 180, 270, fill=fill)
+    return corner
+
+def round_rectangle(size, radius, fill):
+    """Draw a rounded rectangle"""
+    width, height = size
+    rectangle = Image.new('RGBA', size, fill)
+    corner = round_corner(radius, fill)
+    rectangle.paste(corner, (0, 0))
+    rectangle.paste(corner.rotate(90), (0, height - radius)) # Rotate the corner and paste it
+    rectangle.paste(corner.rotate(180), (width - radius, height - radius))
+    rectangle.paste(corner.rotate(270), (width - radius, 0))
+    return rectangle
 
 def week_at_a_glance(cal_feed, adj_week, start_time = datetime.date.today(), spec_title = False):
     # Image constants
@@ -159,15 +177,18 @@ def week_at_a_glance(cal_feed, adj_week, start_time = datetime.date.today(), spe
         wr_day = next_monday + datetime.timedelta(n)
         # Draw calendar date onto calendar
         draw.text((10+day_width*n, 198), str(wr_day.day), (0,0,0), font=day_font)
-        holy_day = get_saints_day(wr_day, lit_cal)
+        lines = textwrap.wrap(get_saints_day(wr_day, lit_cal), width=20)
         m = 0
-        for line in textwrap.wrap(holy_day, width=20):
-            draw.text((40+day_width*n, 198+12*m), line, (0,0,0), font=desc)
+        for ndx, line in enumerate(lines):
+            draw.text((40+day_width*n, 198+12*m), line + ('...' if ndx == 1 and len(lines) > 2 else ''), (0,0,0), font=desc)
+            if ndx == 1 and len(line) > 2:
+                break
             m = m + 1
         to_edit[wr_day] = []
         # mth row to write text on
         m = 0
         # Iterate through the OrgSync Feed
+        m1 = 0
         for item in cal_feed['all_day']:
             if item['advert'] == 'on' and item['event:startdate'] < wr_day + datetime.timedelta(1) and item['event:enddate'] >= wr_day:
                 # Create event string
@@ -179,7 +200,13 @@ def week_at_a_glance(cal_feed, adj_week, start_time = datetime.date.today(), spe
                         draw.text((10+day_width*n, 230+event_text_height*m),line,(255,255,255),font=all_day)
                     #o = draw.textsize(line,font=event)[0]
                     m = m + 1
-        m1 = 0
+                if 'desc_on' in item and item['desc_on'] == 'on' and item['description'] and wr_day - item['event:startdate'] < datetime.timedelta(1):
+                    lines = textwrap.wrap(item['description'], width=22)
+                    draw.rectangle([(10+day_width*n,230+event_text_height*m+desc_text_height*m1),(150+day_width*n,230+event_text_height*m+desc_text_height*(m1+len(lines)))],fill=lighten(colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other']))
+                    for line in lines:
+                        (w, h) = draw.textsize(line,font=desc)
+                        draw.text((10+day_width*n+(140-w)/2, 230+event_text_height*m+desc_text_height*m1),line,(0,0,0),font=desc)
+                        m1 = m1 + 1
         if wr_day in cal_feed['daily']:
             for item in cal_feed['daily'][wr_day]:
                 to_edit[wr_day].append(item)
@@ -197,7 +224,7 @@ def week_at_a_glance(cal_feed, adj_week, start_time = datetime.date.today(), spe
                         m = m + 1
                     if 'desc_on' in item and item['desc_on'] == 'on' and item['description']:
                         lines = textwrap.wrap(item['description'], width=22)
-                        draw.rectangle([(10+day_width*n,230+event_text_height*m+desc_text_height*m1),(150+day_width*n,230+event_text_height*m+desc_text_height*(m1+len(lines)))],fill=lighten(colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other']), outline=(0,0,0))
+                        draw.rectangle([(10+day_width*n,230+event_text_height*m+desc_text_height*m1),(150+day_width*n,230+event_text_height*m+desc_text_height*(m1+len(lines)))],fill=lighten(colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other']))
                         for line in lines:
                             (w, h) = draw.textsize(line,font=desc)
                             draw.text((10+day_width*n+(140-w)/2, 230+event_text_height*m+desc_text_height*m1),line,(0,0,0),font=desc)
@@ -271,7 +298,7 @@ def this_week_at_GTCC(cal_feed, adj_week, start_time = datetime.date.today(), sp
                         m = m + 1
                     if 'desc_on' in item and item['desc_on'] == 'on' and item['description']:
                         lines = textwrap.wrap(item['description'], width=22)
-                        draw.rectangle([(5+day_width*n,start_height+event_text_height*m+desc_text_height*m1),(150+day_width*n,start_height+event_text_height*m+desc_text_height*(m1+len(lines)))],fill=lighten(colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other']), outline=(0,0,0))
+                        draw.rectangle([(5+day_width*n,start_height+event_text_height*m+desc_text_height*m1),(150+day_width*n,start_height+event_text_height*m+desc_text_height*(m1+len(lines)))],fill=lighten(colors[item['event:type'] if item['event:type'] in colors.keys() else 'Other']))
                         for line in lines:
                             (w, h) = draw.textsize(line,font=desc)
                             draw.text((10+day_width*n+(140-w)/2, start_height+event_text_height*m+desc_text_height*m1),line,(0,0,0),font=desc)

@@ -7,6 +7,7 @@ import pytz
 import textwrap
 import cal_maker
 import pprint as pp
+import webbrowser
 
 app = Bottle()
 
@@ -19,7 +20,7 @@ def load_html(files):
             templates[file] = f.read()
     return templates
 
-templates = load_html(['home','template','accordion','weekGT','accordion_all_day', 'weekFB'])
+templates = load_html(['home','template','accordion','weekGT', 'weekFB'])
 
 cal_feed = {}
 
@@ -43,7 +44,6 @@ def refresh_OrgSync():
     y = {'advert': 'on', 'desc_on': None}
     daily = {d_to_dt(datetime.timedelta(day) + start):
         [{**item, **y} for item in feed if item['event:startdate'] <= d_to_dt(datetime.timedelta(day+1) + start) and item['event:enddate'] >= d_to_dt(datetime.timedelta(day) + start) and not item['isallday']] for day in range((last - start).days)}
-    y = {'advert': 'on'}
     all_day = [{**item, **y} for item in feed if item['isallday']]
     return {'daily': daily, 'all_day': all_day}
 
@@ -73,20 +73,21 @@ def weekGT():
         accord = ''
         for event in cal_feed['all_day']:
             if event['event:startdate'] < max(editable.keys()) and event['event:enddate'] >= min(editable.keys()):
-                anacc = templates['accordion_all_day'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(event['event:startdate'].month),day_=str(event['event:startdate'].day))
+                anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(event['event:startdate'].month),day_=str(event['event:startdate'].day),description='' if 'description' not in event else event['description'])
                 accord = accord + anacc
         for day in editable:
             for event in editable[day]:
                 anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(day.month),day_=str(day.day),description='' if 'description' not in event else event['description'])
                 accord = accord + anacc
         return templates['template'].format(body=templates['weekGT'],home_act='',prt_act='',GT_act='class="active"',week_act='',end_act='').format(image=active_glance,accordion='''<div class="panel-group" id="accordion">
-    <form action="/weekGT" method="POST">'''+accord+
+    <form action="/weekGT" method="POST"><input type="hidden" name="ask_week" value="'''+str(ask_week)+'''"/>'''+accord+
             '''            <br>
             <button type="submit" class="btn btn-default" name="save2" value="iii">Update</button>
     </form>
 </div>''')
     elif request.POST.save2:
         request.POST.pop('save2', None)
+        ask_week = int(request.POST.pop('ask_week'))
         ids = set([key.split('-')[-1] for key in request.POST])
         features = {id: {key.split('-')[0]: request.POST[key] for key in request.POST if key.split('-')[-1] == id} for id in ids}
         for id in features:
@@ -94,7 +95,9 @@ def weekGT():
             for event in cal_feed['all_day']:
                 if id == event['link'].split('/')[-1]:
                     event['advert'] = 'on' if 'advert' in features[id] else 'off'
+                    event['desc_on'] = 'on' if 'desc_on' in features[id] else 'off'
                     event['title'] = features[id]['title']
+                    event['description'] = features[id]['description']
                     comp = True
                     break
             for day in cal_feed['daily']:
@@ -109,19 +112,18 @@ def weekGT():
                             event['description'] = features[id]['description']
                             break
                             break
-        ask_week = 0
         active_glance, editable = cal_maker.week_at_a_glance(cal_feed, ask_week)
         accord = ''
         for event in cal_feed['all_day']:
             if event['event:startdate'] < max(editable.keys()) and event['event:enddate'] >= min(editable.keys()):
-                anacc = templates['accordion_all_day'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(event['event:startdate'].month),day_=str(event['event:startdate'].day))
+                anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(event['event:startdate'].month),day_=str(event['event:startdate'].day),description='' if 'description' not in event else event['description'])
                 accord = accord + anacc
         for day in editable:
             for event in editable[day]:
                 anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(day.month),day_=str(day.day),description='' if 'description' not in event else event['description'])
                 accord = accord + anacc
         return templates['template'].format(body=templates['weekGT'],home_act='',prt_act='',GT_act='class="active"',week_act='',end_act='').format(image=active_glance,accordion='''<div class="panel-group" id="accordion">
-    <form action="/weekGT" method="POST">'''+accord+
+    <form action="/weekGT" method="POST"><input type="hidden"  name="ask_week" value="'''+str(ask_week)+'''"/>'''+accord+
             '''            <br>
             <button type="submit" class="btn btn-default" name="save2" value="iii">Update</button>
     </form>
@@ -143,20 +145,21 @@ def weekFB():
         accord = ''
         for event in cal_feed['all_day']:
             if event['event:startdate'] < max(editable.keys()) and event['event:enddate'] >= min(editable.keys()):
-                anacc = templates['accordion_all_day'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(event['event:startdate'].month),day_=str(event['event:startdate'].day))
+                anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(event['event:startdate'].month),day_=str(event['event:startdate'].day),description='' if 'description' not in event else event['description'])
                 accord = accord + anacc
         for day in editable:
             for event in editable[day]:
                 anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(day.month),day_=str(day.day),description='' if 'description' not in event else event['description'])
                 accord = accord + anacc
         return templates['template'].format(body=templates['weekFB'],home_act='',prt_act='',GT_act='',week_act='class="active"',end_act='').format(image=active_glance,accordion='''<div class="panel-group" id="accordion">
-    <form action="/weekFB" method="POST">'''+accord+
+    <form action="/weekFB" method="POST"><input type="hidden"  name="ask_week" value="'''+str(ask_week)+'''"/>'''+accord+
             '''            <br>
             <button type="submit" class="btn btn-default" name="save2" value="iii">Update</button>
     </form>
 </div>''')
     elif request.POST.save2:
         request.POST.pop('save2', None)
+        ask_week = int(request.POST.pop('ask_week'))
         ids = set([key.split('-')[-1] for key in request.POST])
         features = {id: {key.split('-')[0]: request.POST[key] for key in request.POST if key.split('-')[-1] == id} for id in ids}
         for id in features:
@@ -164,7 +167,9 @@ def weekFB():
             for event in cal_feed['all_day']:
                 if id == event['link'].split('/')[-1]:
                     event['advert'] = 'on' if 'advert' in features[id] else 'off'
+                    event['desc_on'] = 'on' if 'desc_on' in features[id] else 'off'
                     event['title'] = features[id]['title']
+                    event['description'] = features[id]['description']
                     comp = True
                     break
             for day in cal_feed['daily']:
@@ -184,14 +189,14 @@ def weekFB():
         accord = ''
         for event in cal_feed['all_day']:
             if event['event:startdate'] < max(editable.keys()) and event['event:enddate'] >= min(editable.keys()):
-                anacc = templates['accordion_all_day'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(event['event:startdate'].month),day_=str(event['event:startdate'].day))
+                anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(event['event:startdate'].month),day_=str(event['event:startdate'].day),description='' if 'description' not in event else event['description'])
                 accord = accord + anacc
         for day in editable:
             for event in editable[day]:
                 anacc = templates['accordion'].format(id=event['link'].split('/')[-1],title=event['title'],month=str(day.month),day_=str(day.day),description='' if 'description' not in event else event['description'])
                 accord = accord + anacc
         return templates['template'].format(body=templates['weekFB'],home_act='',prt_act='',GT_act='',week_act='class="active"',end_act='').format(image=active_glance,accordion='''<div class="panel-group" id="accordion">
-    <form action="/weekFB" method="POST">'''+accord+
+    <form action="/weekFB" method="POST"><input type="hidden"  name="ask_week" value="'''+str(ask_week)+'''"/>'''+accord+
             '''            <br>
             <button type="submit" class="btn btn-default" name="save2" value="iii">Update</button>
     </form>
@@ -199,4 +204,5 @@ def weekFB():
     else:
         return templates['template'].format(body=templates['weekFB'],home_act='',prt_act='',GT_act='',week_act='class="active"',end_act='').format(image='week.png',accordion='')
 
+webbrowser.open('http://localhost:8080',new=2)
 run(app, host='localhost', port=8080)
