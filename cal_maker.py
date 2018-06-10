@@ -8,6 +8,10 @@ import arrow
 import requests
 import re
 import random
+import calendar
+import os
+
+directory = os.path.expanduser('~/Pictures/GTCC Calendars')
 
 eastern = pytz.timezone('US/Eastern')
 
@@ -186,7 +190,7 @@ def week_at_a_glance(cal_feed, adj_week, start_time = datetime.date.today(), spe
                 months[(next_monday + datetime.timedelta(6)).month - 1] + ' ' +
                 str((next_monday + datetime.timedelta(6)).day))
     # Pull image from template
-    img = Image.open("glance.png").convert('RGBA')
+    img = Image.open("templates/glance.png").convert('RGBA')
     draw = ImageDraw.Draw(img)
 
     # Initialize Fonts
@@ -212,8 +216,8 @@ def week_at_a_glance(cal_feed, adj_week, start_time = datetime.date.today(), spe
             draw.text((offset+30+(day_width+bar_width)*n, 198+desc_text_size*ndx), line + ('...' if ndx == 1 and len(lines) > 2 else ''), 'black', font=desc)
         to_edit[wr_day] = populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width)
     # Save finalized image
-    img.save(week_str + '.png')
-    return week_str + '.png', to_edit
+    img.save(directory + '/' + week_str + '.png')
+    return directory + '/' + week_str + '.png', to_edit
 
 def this_week_at_GTCC(cal_feed, adj_week, start_time = datetime.date.today(), spec_title = False):
     # Image constants
@@ -236,7 +240,7 @@ def this_week_at_GTCC(cal_feed, adj_week, start_time = datetime.date.today(), sp
                 months[(next_monday + datetime.timedelta(4)).month - 1] + ' ' +
                 str((next_monday + datetime.timedelta(4)).day))
     # Pull image from template
-    img = Image.open("week.png").convert('RGBA')
+    img = Image.open("templates/week.png").convert('RGBA')
     draw = ImageDraw.Draw(img)
 
     # Initialize Fonts
@@ -263,8 +267,8 @@ def this_week_at_GTCC(cal_feed, adj_week, start_time = datetime.date.today(), sp
             draw.text(((day_width+bar_width)*n+(day_width-1-w)/2, event_start_height-22), lines[0] + ('...' if len(lines) > 1 else ''), 'black', font=desc)
         to_edit[wr_day] = populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width)
     # Save finalized image
-    img.save(week_str + '.png')
-    return week_str + '.png', to_edit
+    img.save(directory + '/' + week_str + '.png')
+    return directory + '/' + week_str + '.png', to_edit
 
 def this_weekend_at_GTCC(cal_feed, adj_week, start_time = datetime.date.today(), spec_title = False):
     # Image constants
@@ -287,7 +291,7 @@ def this_weekend_at_GTCC(cal_feed, adj_week, start_time = datetime.date.today(),
                 months[(next_friday + datetime.timedelta(2)).month - 1] + ' ' +
                 str((next_friday + datetime.timedelta(2)).day))
     # Pull image from template
-    img = Image.open("weekend.png").convert('RGBA')
+    img = Image.open("templates/weekend.png").convert('RGBA')
     draw = ImageDraw.Draw(img)
 
     # Initialize Fonts
@@ -315,5 +319,48 @@ def this_weekend_at_GTCC(cal_feed, adj_week, start_time = datetime.date.today(),
             draw.text(((day_width+bar_width)*n+(day_width-1-w)/2, event_start_height-30), lines[0] + ('...' if len(lines) > 1 else ''), 'black', font=desc)
         to_edit[wr_day] = populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width, px = offset)
     # Save finalized image
-    img.save(week_str + '.png')
-    return week_str + '.png', to_edit
+    img.save(directory + '/' + week_str + '.png')
+    return directory + '/' + week_str + '.png', to_edit
+
+def big_calendar(cal_feed, start_time = datetime.date.today(), spec_title = False):
+    # Image constants
+    day_width = 2040
+    bar_width = 20
+    offset = day_width/20
+    event_text_size = 144
+    text_width = 28
+    desc_text_size = 108
+    desc_width = 35
+    event_text_height = round(1.25*event_text_size)
+    desc_text_height = round(1.25*desc_text_size)
+    event_start_height = 3200
+
+    # Get Monday after start_time at midnight
+    first_day = d_to_dt(start_time.replace(day=1,month=(start_time.month%12)+1,year=start_time.year+int(start_time.month/12)))
+    # Pull image from template
+    img = Image.open("templates/monthCal.png").convert('RGBA')
+    draw = ImageDraw.Draw(img)
+
+    # Initialize Fonts
+    day_font = ImageFont.truetype("Roboto-Black.ttf", 250)
+    all_day = ImageFont.truetype("Roboto-Bold.ttf", event_text_size)
+    event = ImageFont.truetype("Roboto-Regular.ttf", event_text_size)
+    desc = ImageFont.truetype("Roboto-Regular.ttf", desc_text_size)
+
+    to_edit = {}
+    # Loop through the 7 days of the week
+    for day in range(calendar.monthrange(first_day.year,first_day.month)[1]):
+        # Increment days
+        wr_day = first_day + datetime.timedelta(day)
+        week = wr_day.isocalendar()[1] - first_day.isocalendar()[1] - 1 + (1 if wr_day.weekday() == 6 else 0)
+        n = [1,2,3,4,5,6,0][wr_day.weekday()]
+        # Draw calendar date onto calendar
+        draw.text((offset+(day_width+bar_width)*n, 2900+week*1588), str(wr_day.day), (0,0,0), font=day_font)
+        # Draw Saint day onto calendar (max 2 lines)
+        lines = textwrap.wrap(get_saints_day(wr_day, lit_cal), width=28)
+        for ndx, line in enumerate(lines[:2]):
+            draw.text((offset+400+(day_width+bar_width)*n, 2915+week*1588+desc_text_size*ndx), line + ('...' if ndx == 1 and len(lines) > 2 else ''), 'black', font=desc)
+        to_edit[wr_day] = populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height+1588*week, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width)
+    # Save finalized image
+    img.save(directory + '/' + months[first_day.month-1] + '.png')
+    return directory + '/' + months[first_day.month-1] + '.png', to_edit
