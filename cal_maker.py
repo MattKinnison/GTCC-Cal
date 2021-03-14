@@ -208,14 +208,15 @@ class event_calendar:
     def __init__(self, cal_link, fmt):
         self.cal_feed = ics.Calendar(requests.get(cal_link).text.encode('latin-1').decode('utf-8')).events
 
+        # Convert all events to the central time zone (except all day events as they're different)
         for event in self.cal_feed:
-            if not event.all_day: #(event.end - event.begin).total_seconds() < 66400:
-                event.begin = event.begin.to('US/Central')#.replace(hours=-5)
+            if not event.all_day:
+                event.begin = event.begin.to('US/Central')
                 event.end = event.end.to('US/Central')
 
         self.fmt = fmt
 
-    def __call__(self, dt, loc):
+    def __call__(self, draw, dt, loc):
 
         ## All Day Events ##
         # Filter for all day events on this date
@@ -233,9 +234,40 @@ class event_calendar:
         events = all_day_events + hourly_events
 
         # Turn into printable stings
-        event_str = [self.make_printable(event) for event in events]
+        event_strs = [self.make_printable(event) for event in events]
 
-        return event_str
+        # Break into various lines for each event string
+        event_strs = [textwrap.wrap(e_str, width=self.fmt['char_width']) for e_str in event_strs]
+
+        # Start pixel adders
+        bar_px = 0
+        txt_px = 0
+
+        ## Draw bar for event background ##
+        for e, lines in zip(events, event_strs):
+            for line in lines:
+                # Horizontal line, so y is constant. Determine y
+                y = loc[1] + self.fmt['font'].size/2 + bar_px
+
+                # end_x depends on if event continues into next day. Calculate
+                end_x = loc[0] + self.fmt['day_width'] - 1
+                if e.end.replace(days=-2) > dt:
+                    end_x = end_x + self.fmt['bar_width']
+
+                # Draw line
+                draw.line(((loc[0], y), (end_x, y)), fill=self.fmt['color'], width=self.fmt['font'].size+4)
+
+                # Move down
+                bar_px = bar_px + self.fmt['font'].size
+
+        ## Draw text for event background ##
+        for lines in event_strs:
+            for line in lines:
+                # Draw text
+                draw.text((loc[0] + self.fmt['offset'], loc[1] + txt_px - 1), line, fill='white', font=self.fmt['font'])
+
+                # Move down
+                txt_px = txt_px + self.fmt['font'].size
 
 
 
@@ -328,12 +360,15 @@ def week_at_a_glance(cal_feed, adj_week, start_time = arrow.now().floor('day'), 
                  'font': ImageFont.truetype("fonts\\Roboto-Regular.ttf", 11)}
     event_fmt = {'char_width': 23,
                  'color': (165,44,38),
-                 'font': ImageFont.truetype("fonts\\Roboto-Regular.ttf", 12)}
+                 'font': ImageFont.truetype("fonts\\Roboto-Bold.ttf", 12),
+                 'day_width': 160,
+                 'bar_width': 160/40,
+                 'offset': 160/20}
 
     lit_cal = liturgical_calendar(feast_fmt)
 
     cal_link = 'https://calendar.google.com/calendar/ical/stmonicayoungadults%40gmail.com/public/basic.ics'
-    event_calendar(cal_link, event_fmt)
+    event_cal = event_calendar(cal_link, event_fmt)
 
     # Get Monday after start_time at midnight
     first_day = start_time.replace(months=1).floor('month') # Change month here
@@ -377,8 +412,13 @@ def week_at_a_glance(cal_feed, adj_week, start_time = arrow.now().floor('day'), 
         # Draw Saint day onto calendar
         lit_cal(draw, wr_day.date(), (offset+30+(day_width+bar_width)*n, 189+week*102))
 
+        # Draw Events of day onto calendar
+        # loc[0] = (day_width+bar_width)*n
+        # loc[1] = event_start_height
+        event_cal(draw, wr_day, ((day_width+bar_width)*n, event_start_height+week*102))
+
         # to_edit.update(populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width, 0))
-        to_edit.update(populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height+102*week, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width, 6))
+        #to_edit.update(populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height+102*week, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width, 6))
     # Save finalized image
-    img.save(directory + '/' + months[first_day.month-1] + '.png')
-    return directory + '/' + months[first_day.month-1] + '.png', sorted(list(to_edit), key=lambda event: (event.begin, event.end.timestamp*-1))
+    img.save(directory + '\\' + months[first_day.month-1] + '.png')
+    return directory + '\\' + months[first_day.month-1] + '.png', sorted(list(to_edit), key=lambda event: (event.begin, event.end.timestamp*-1))
