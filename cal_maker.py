@@ -1,366 +1,384 @@
-from PIL import Image, ImageFont, ImageDraw
-import datetime
-import dateutil.parser
-import pytz
-import textwrap
+try:
+    from pip import main as pipmain
+except:
+    from pip._internal import main as pipmain
+try:
+    from PIL import Image, ImageFont, ImageDraw
+except:
+    pipmain(['install','pillow'])
+    from PIL import Image, ImageFont, ImageDraw
+try:
+    import textwrap
+except:
+    pipmain(['install','textwrap'])
+    import textwrap
 import ics
-import arrow
+try:
+    import arrow
+except:
+    pipmain(['install','arrow'])
+    import arrow
 import requests
 import re
 import random
 import calendar
 import os
 
-directory = os.path.expanduser('~/Pictures/GTCC Calendars')
+directory = os.path.expanduser('~\\Pictures\\St. Monica Calendars')
+months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec']
 
-eastern = pytz.timezone('US/Eastern')
+class liturgical_calendar:
+    # A custom wrapper for the universalis calendar.
+    # Limits print to one saint per day (choosen at random).
+    # Removes ordinary days (weekdays without a feast day).
+    # Removes titles associated with certain saints (i.e. martyr, doctor, etc.)
+    # Replaces december dates with the O Antiphons associated with that day.
 
-months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    O_antiphon_map = {"17 December": "O Sapientia",#\n(O Wisdom)",
+                      '18 December': 'O Adonai',#\n(O Lord)',
+                      '19 December': 'O Radix Jesse',#\n(O Root of Jesse)',
+                      '20 December': 'O Clavis David',#\n(O Key of David)',
+                      '21 December': 'O Oriens',#\n(O Dayspring)',
+                      '22 December': 'O Rex Gentium',#\n(O King of the Nations)',
+                      '23 December': 'O Emmanuel',#\n(O With Us is God)',
+                      '24 December': ""}
 
-lit_cal = ics.Calendar(requests.get('http://www.universalis.com/vcalendar.ics').text.encode('latin-1').decode('utf-8')).events
+    def is_interesting(self, feast):
+        # Determines if an feast is worth advertizing
 
-# Set Category colors
-colors = {  "Faith Formation": (136,40,136),
-            "Community Life": (57,83,164),
-            "Freshmen Events": (57,83,164),
-            "Liturgy": (225,72,154),
-            "Outreach": (12,128,64),
-            "Knights of Columbus": (237,31,36),
-            "Graduate Student Events": (246,133,32),
-            "FOCUS": (2,147,140),
-            "Other": (0,0,0)
-          }
+        if any(ft in feast for ft in ['Saint', 'Sunday']):
+            # If it is a Sunday or has a saint, definitely advertize
+            return True
+        elif any(ft in feast for ft in ['Ordinary Time', 'Lent', 'Advent', 'after', 'of Easter', 'of Christmas', 'January', 'Saturday memorial']):
+            # If it is a weekday without a saint (i.e. just in a given liturgical season), do not advertize. ALso skip every Saturday BVM memorial.
+            return False
+        else:
+            # Default to including it is its something else. Who knows, could be interested
+            return True
 
-gt_order = {"Faith Formation": 4,
-            "Community Life": 5,
-            "Freshmen Events": 5,
-            "Liturgy": 1,
-            "Outreach": 2,
-            "Knights of Columbus": 0,
-            "Graduate Student Events": 3,
-            "FOCUS": 0,
-            "Other": 0
-          }
+    def is_title(self, str):
+        # Determines if a string contains a Saint's title
 
-def d_to_dt(d):
-    return eastern.localize(datetime.datetime.combine(d,datetime.time.min))
+        # This list may need to be expanded
+        titles = ['Priest', 'Virgin', 'Pope', 'Bishop', 'Martyr', 'Religious', 'Doctor', 'Abbot', 'Apostle', 'Evangelist' 'Deacon']
 
-def is_interesting(event):
-    if 'Saint' in event:
-        return True
-    if 'Sunday' in event:
-        return True
-    elif 'Ordinary Time' in event:
-        return False
-    elif 'Lent' in event:
-        return False
-    elif 'Advent' in event:
-        return False
-    elif 'after' in event:
-        return False
-    elif 'of Easter' in event:
-        return False
-    elif 'of Christmas' in event:
-        return False
-    elif 'January' in event:
-        return False
-    elif 'December' in event:
-        return False
-    elif'Saturday memorial' in event:
-        return False
-    else:
-        return True
+        if any((x in str) for x in ['First', 'Mary', 'Corpus']):
+            # Mary deserves here titles, and First and Corpus Christi cause bugs
+            return False
+        elif any((x in str) for x in titles):
+            return True
+        else:
+            return False
 
-def is_not_title(word):
-    if 'First' in word:
-        return True
-    elif 'Mary' in word:
-        return True
-    elif 'Corpus' in word:
-        return True
-    elif 'Priest' in word:
-        return False
-    elif 'Virgin' in word:
-        return False
-    elif 'Pope' in word:
-        return False
-    elif 'Bishop' in word:
-        return False
-    elif 'Martyr' in word:
-        return False
-    elif 'Religious' in word:
-        return False
-    elif 'Doctor' in word:
-        return False
-    elif 'Abbot' in word:
-        return False
-    elif 'Apostle' in word:
-        return False
-    elif 'Evangelist' in word:
-        return False
-    elif 'Deacon' in word:
-        return False
-    else:
-        return True
+    def __init__(self, fmt):
+        self.lit_cal = ics.Calendar(requests.get('http://www.universalis.com/vcalendar.ics').text.encode('latin-1').decode('utf-8')).events
+        self.fmt = fmt
 
-def get_saints_day(wr_day, lit_cal):
-    day_string = [holy_day.name for holy_day in lit_cal if holy_day.begin.date() == wr_day.date()][0]
-    day_events = [event for event in re.split(',\n or |,\n \(commemoration of ',day_string) if is_interesting(event)]
-    if day_events:
-        word = ' '.join([word.strip() for word in random.choice(day_events).split(', ') if is_not_title(word)])
-        return word if word[-1] != ')' and '(' not in word else word[:-1]
-    else:
-        return ''
+    def get_feast_from_date(self, date):
+        # TODO
+
+        # Filter calendar for our date
+        feast_names = [ft.name for ft in self.lit_cal if ft.begin.date() == date]
+
+        # If there are multiple feast days listed seperately (unusual), limit to just the first one listed. Else, bypass the rest of this function.
+        if feast_names:
+            feasts = feast_names[0]
+        else:
+            return ''
+
+        # Multiple days can be listed in a single string. This breaks those up.
+        feasts_list = re.split(',\n or |,\n \(commemoration of ', feasts)
+
+        # Limit list to those feasts worth advertizing
+        feasts_list = [ft for ft in feasts_list if self.is_interesting(ft)]
+
+        # If there aren't any feasts to advertize, bypass the rest of this function
+        if not feasts_list:
+            return ''
+
+        # If there are multiple advertizable feasts, pick one randomly
+        feast = random.choice(feasts_list)
+
+        # Remove any hanging parentheses
+        if (feast[-1] == ')') and ('(' not in feast):
+            feast = feast[:-1]
+
+        # Replace any December date with the O Antiphon from that day
+        if "December" in feast:
+            feast = O_antiphons[feast]
+
+        return feast
+
+    def abbreviate_feast(self, feast):
+        # Sometimes feast days are too long for all calendar. This does its best to shorten those
+
+        # Remove "The" from feast day
+        feast = re.sub(r"The ", "", feast)
+
+        # Abbreviate "Saints" to "Sts."
+        feast = re.sub(r'Saints','Sts.', feast)
+
+        # Abbreviate "Saint" to "St."
+        feast = re.sub(r'Saint','St.', feast)
+
+        # Don't abbrevaite All Saints!! (Bug fix)
+        if feast == "All Sts.":
+            feast = "All Saints Day"
+
+        # Remove special titles from each saint
+        feast_parts = feast.split(', ')
+        feast_parts = [part.strip() for part in feast_parts if not self.is_title(part)]
+        feast = ' '.join(feast_parts)
+
+        return feast
+
+    def __call__(self, draw, date, loc):
+
+        # Get feast name with helper function
+        feast = self.get_feast_from_date(date)
+
+        # Abbreviate feast to fit on calendar
+        feast = self.abbreviate_feast(feast)
+
+        ## Actually draw on image ##
+        # Break text into lines
+        lines = textwrap.wrap(feast, width=self.fmt['char_width'])
+
+        # Draw to image, spaces lines one after another
+        for ndx, line in enumerate(lines):
+            # If you can't fit full title still, shorten with "..."
+            if (ndx == self.fmt['lines'] - 1) and (len(lines) > self.fmt['lines']):
+                line = line + "..."
+            elif ndx > self.fmt['lines'] - 1:
+                line = ""
+
+            draw.text((loc[0], loc[1] + ndx * self.fmt['font'].size), line, self.fmt['color'], font=self.fmt['font'])
+
+class event_calendar:
+    # Convert a .ics link into events on the calendar.
+    # Format the date correctly.
+
+    def printable_time(self, dt):
+        # Convert to 12 hour time
+        h = str(((dt.hour-1) % 12) + 1)
+
+        # Ignore minutes if 0
+        if dt.minute == 0:
+            m = ""
+        else:
+            m = ':'+str(dt.minute).zfill(2)
+
+        # Get AM/PM
+        _m = 'AM' if dt.hour < 12 else 'PM'
+
+        return h + m + _m
+
+    def printable_times(self, item):
+
+        # Exception list - Events with no offical end time (may need to be modified over time)
+        start_only_keywords = {'Formation', '(Live)', '(Zoom)'}
+
+        # Get start time using helper function
+        start_time = self.printable_time(item.begin)
+
+        if any([exem in item.name for exem in start_only_keywords]):
+            # If a start only date, print start and bypass
+            return start_time + " | "
+        else:
+            # Get end time using helper function
+            end_time = self.printable_time(item.end)
+
+            # If starts and ends in same half of the day, abbreviate start time
+            if end_time[-2:] == start_time[-2:]:
+                start_time = start_time[:-2]
+
+            return start_time + "-" + end_time + " | "
+
+    def make_printable(self, event):
+        # Add a time to the event name (if applicable)
+
+        str = event.name
+
+        # If hourly event, give times
+        if not event.all_day and (event.end - event.begin).days == 0:
+            str = self.printable_times(event) + str
+
+        return str
+
+    def __init__(self, cal_link, fmt):
+        self.cal_feed = ics.Calendar(requests.get(cal_link).text.encode('latin-1').decode('utf-8')).events
+
+        for event in self.cal_feed:
+            if not event.all_day: #(event.end - event.begin).total_seconds() < 66400:
+                event.begin = event.begin.to('US/Central')#.replace(hours=-5)
+                event.end = event.end.to('US/Central')
+
+        self.fmt = fmt
+
+    def __call__(self, dt, loc):
+
+        ## All Day Events ##
+        # Filter for all day events on this date
+        all_day_events = [event for event in self.cal_feed if event.all_day and event.begin.date() <= dt.date() and event.end.date() > dt.date()]
+        # Sort by first start date (then by last end date if two events start simultaneously)
+        all_day_events = sorted(all_day_events, key=lambda event: (event.begin, event.end.timestamp*-1))
+
+        ## Hourly Events ##
+        # Filter for shorter events on this date
+        hourly_events  = [event for event in self.cal_feed if event.begin <= dt.ceil('day') and event.end >= dt.floor('day')]
+        # Sort by first start date (then by last end date if two events start simultaneously)
+        hourly_events = sorted(hourly_events, key=lambda event: (event.begin, event.end.timestamp*-1))
+
+        # Combine events
+        events = all_day_events + hourly_events
+
+        # Turn into printable stings
+        event_str = [self.make_printable(event) for event in events]
+
+        return event_str
+
+
+
+def populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width, first_day, px = 0):
+    to_edit = set()
+    # Iterate through the OrgSync Feed
+    for item in cal_feed:
+
+        if item.all_day:
+            if item.begin.date() <= wr_day.date() and item.end.date() > wr_day.date():
+                to_edit.add(item)
+                px = draw_event(draw, item, n, px, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width, first_day)
+        elif item.begin <= wr_day.ceil('day') and item.end > wr_day.floor('day').replace(seconds=1):
+        # ((item.begin >= wr_day.floor('day') and item.end < wr_day.replace(days=1)) or
+        #     (item.all_day and (item.begin <= wr_day and item.end > wr_day.replace(days=1) )) or
+        #     (item.begin.day != item.end.day and not item.all_day and (item.begin < wr_day.replace(days=1) and item.end >= wr_day))):
+            to_edit.add(item)
+            px = draw_event(draw, item, n, px, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width, first_day)
+    return to_edit
 
 def next_weekday(d, weekday): # 0 = Monday, 1=Tuesday, 2=Wednesday...
     days_ahead = weekday - d.weekday()
     if days_ahead <= 0: # Target day already happened this week
         days_ahead += 7
-    return d + datetime.timedelta(days_ahead)
+    return d.replace(days=days_ahead)
 
 def lighten(color):
     return tuple(list(color)+[125])
 
-def make_date(item):
-    return (str(((item['event:startdate'].hour-1) % 12)+1) +
-                ('' if item['event:startdate'].minute == 0 else (':'+str(item['event:startdate'].minute).zfill(2))) +
-                (('AM' if item['event:startdate'].hour < 12 else 'PM') if ('AM' if item['event:startdate'].hour < 12 else 'PM') != ('AM' if item['event:enddate'].hour < 12 else 'PM') else '') +
-                '-' + str(((item['event:enddate'].hour-1) % 12)+1) +
-                ('' if item['event:enddate'].minute == 0 else (':'+str(item['event:enddate'].minute).zfill(2))) +
-                ('AM' if item['event:enddate'].hour < 12 else 'PM') +
-                ' | ')
-
-def draw_desc(draw, item, n, px, wr_day, offset, bar_width, day_width, event_start_height, event_text_height, desc_text_height, desc, desc_width):
-    if 'desc_on' in item and item['desc_on'] == 'on' and item['description'] and wr_day - item['event:startdate'] < datetime.timedelta(1):
-        px = px + offset
-        lines = [l2 for l1 in item['description'].split('\n') for l2 in textwrap.wrap(l1, width=desc_width, drop_whitespace=False)]
-        draw.rectangle([(offset+(day_width+bar_width)*n,event_start_height+px),((day_width+bar_width)*(n)+day_width-1-offset,event_start_height+desc_text_height*len(lines)+px)],fill=lighten(colors.get(item['event:type'], 'black')))
-        for line in lines:
-            (w, h) = draw.textsize(line,font=desc)
-            draw.text(((day_width+bar_width)*n+(day_width-1-w)/2, event_start_height+px),line,'black',font=desc)
-            px = px + desc_text_height
-        px = px + offset
-    return px
-
-def draw_event(draw, item, n, px, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width):
-    if item['advert'] == 'on' and ((not item['isallday']) or (item['event:startdate'] < wr_day + datetime.timedelta(1) and item['event:enddate'] >= wr_day)):
+def draw_event(draw, item, n, px, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width, first_day):
+    if not item.transparent:# and ((not item.all_day) or (item.begin <= wr_day.replace(days=1) and item.end >= wr_day)):
         # Create event string
-        to_draw = ('' if item['isallday'] else make_date(item)) + item['title']
+        to_draw = ('' if item.all_day else make_date(item)) + item.name
         # Use textwrap to make sure line doesn't exceed calendar day
-        for line in textwrap.wrap(to_draw, width=text_width):
-            if item['isallday']:
-                draw.line([((day_width+bar_width)*n,event_start_height+event_text_size/2+px), ((day_width+bar_width)*n+day_width+(0 if item['event:enddate'] - datetime.timedelta(1) <= wr_day else bar_width)-1,event_start_height+event_text_size/2+px)], fill=colors.get(item['event:type'], 'black'), width=event_text_height)
-                if wr_day.weekday() == 0 or item['event:startdate'] >= wr_day:
-                    draw.text((offset+(day_width+bar_width)*n, event_start_height+px),line,'white',font=all_day)
+        px_adder = 0
+
+        print(item.name, item.all_day)
+
+        if item.all_day:
+            for line in textwrap.wrap(to_draw, width=text_width):
+                draw.line([((day_width+bar_width)*n,event_start_height+event_text_size/2+px+px_adder), ((day_width+bar_width)*n+day_width+(0 if item.end.replace(days=-2) <= wr_day else bar_width)-1,event_start_height+event_text_size/2+px+px_adder)], fill=(128,128,128), width=event_text_height+1) #(0,0,0)
+                px_adder = px_adder + event_text_height
+            if wr_day.weekday() == first_day or item.begin >= wr_day.replace(days=-1):
+                px_adder = 0
+                for line in textwrap.wrap(to_draw, width=text_width):
+                    draw.text((offset+(day_width+bar_width)*n, event_start_height+px+px_adder),line,'white',font=all_day)
+                    px_adder = px_adder + event_text_height
+        elif item.begin.day != item.end.day:
+            for line in textwrap.wrap(to_draw, width=text_width):
+                draw.line([((day_width+bar_width)*n,event_start_height+event_text_size/2+px+px_adder), ((day_width+bar_width)*n+day_width+(0 if item.end.replace(days=-1) <= wr_day else bar_width)-1,event_start_height+event_text_size/2+px+px_adder)], fill=(165,44,38), width=event_text_height+1)
+                px_adder = px_adder + event_text_height
+            px_adder = 0
+            for line in textwrap.wrap(to_draw, width=text_width):
+                if wr_day.weekday() == first_day or item.begin >= wr_day:
+                    draw.text((offset+(day_width+bar_width)*n, event_start_height+px+px_adder),line,'white',font=all_day)
+                    px_adder = px_adder + event_text_height
+        else:
+            if "(Live)" not in to_draw and "(Zoom)" not in to_draw and "SEEK Day" not in to_draw: # For all dark events
+                for line in textwrap.wrap(to_draw, width=text_width):
+                    draw.line([((day_width+bar_width)*n,event_start_height+event_text_size/2+px+px_adder), ((day_width+bar_width)*n+day_width+(0 if item.end.replace(days=-1) <= wr_day else bar_width)-1,event_start_height+event_text_size/2+px+px_adder)], fill=(165,44,38), width=event_text_height+1)
+                    px_adder = px_adder + event_text_height
+                px_adder = 0
+                for line in textwrap.wrap(to_draw, width=text_width):
+                    if wr_day.weekday() == first_day or item.begin >= wr_day:
+                        draw.text((offset+(day_width+bar_width)*n, event_start_height+px+px_adder),line,'white',font=all_day)
+                        px_adder = px_adder + event_text_height
             else:
-                draw.text((offset+(day_width+bar_width)*n, event_start_height+px),line,colors.get(item['event:type'], 'black'),font=event)
-            px = px + event_text_height
-        return draw_desc(draw, item, n, px, wr_day, offset, bar_width, day_width, event_start_height, event_text_height, desc_text_height, desc, desc_width)
+                for line in textwrap.wrap(to_draw, width=text_width):
+                    draw.text((offset+(day_width+bar_width)*n, event_start_height+px+px_adder),line,(165,44,38),font=event)
+                    px_adder = px_adder + event_text_height
+        return px_adder + draw_desc(draw, item, n, px, wr_day, offset, bar_width, day_width, event_start_height, event_text_height, desc_text_height, desc, desc_width)
     else:
         return px
 
-def populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width, px = 0):
-    to_edit = []
-    # Iterate through the OrgSync Feed
-    for item in cal_feed['all_day']:
-        px = draw_event(draw, item, n, px, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width)
-    for item in cal_feed['daily'][wr_day]:
-        to_edit.append(item)
-        px = draw_event(draw, item, n, px, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width)
-    return to_edit
-
-def week_at_a_glance(cal_feed, adj_week, start_time = datetime.date.today(), spec_title = False):
+def week_at_a_glance(cal_feed, adj_week, start_time = arrow.now().floor('day'), spec_title = False):
     # Image constants
     day_width = 160
     bar_width = day_width/40
     offset = day_width/20
-    event_text_size = 16
-    text_width = 19
-    desc_text_size = 12
+    event_text_size = 12
+    text_width = 23
     desc_width = 23
+    desc_text_size = 11
     event_text_height = round(1.25*event_text_size)
     desc_text_height = round(1.25*desc_text_size)
-    event_start_height = 230
+    event_start_height = 216
+    feast_fmt = {'char_width': 21,
+                 'lines': 2,
+                 'color': (128,128,128),
+                 'font': ImageFont.truetype("fonts\\Roboto-Regular.ttf", 11)}
+    event_fmt = {'char_width': 23,
+                 'color': (165,44,38),
+                 'font': ImageFont.truetype("fonts\\Roboto-Regular.ttf", 12)}
+
+    lit_cal = liturgical_calendar(feast_fmt)
+
+    cal_link = 'https://calendar.google.com/calendar/ical/stmonicayoungadults%40gmail.com/public/basic.ics'
+    event_calendar(cal_link, event_fmt)
 
     # Get Monday after start_time at midnight
-    next_monday = d_to_dt(next_weekday(start_time+datetime.timedelta(adj_week*7), 0))
-    # Make title date range
-    week_str = (months[next_monday.month - 1] + ' ' +
-                str(next_monday.day) + ' - ' +
-                months[(next_monday + datetime.timedelta(6)).month - 1] + ' ' +
-                str((next_monday + datetime.timedelta(6)).day))
+    first_day = start_time.replace(months=1).floor('month') # Change month here
+
     # Pull image from template
     img = Image.open("templates/glance.png").convert('RGBA')
     draw = ImageDraw.Draw(img)
 
     # Initialize Fonts
-    title = ImageFont.truetype("Carme-Regular.ttf", 88)
-    day_font = ImageFont.truetype("Roboto-Black.ttf", 22)
-    all_day = ImageFont.truetype("Roboto-Bold.ttf", event_text_size)
-    event = ImageFont.truetype("Roboto-Regular.ttf", event_text_size)
-    desc = ImageFont.truetype("Roboto-Regular.ttf", desc_text_size)
+    title = ImageFont.truetype("fonts\\Carme-Regular.ttf", 88)
+    day_font = ImageFont.truetype("fonts\\Roboto-Black.ttf", 22)
+    all_day = ImageFont.truetype("fonts\\Roboto-Bold.ttf", event_text_size)
+    event = ImageFont.truetype("fonts\\Roboto-Regular.ttf", event_text_size)
 
     # Draw Title
-    draw.text((offset, 20),spec_title if spec_title else week_str,(255, 222, 118),font=title)
+    #draw.text((offset, 20),spec_title if spec_title else week_str,(255, 222, 118),font=title)
 
-    to_edit = {}
+    to_edit = set()
     # Loop through the 7 days of the week
-    for n in range(7):
-        # Increment days
-        wr_day = next_monday + datetime.timedelta(n)
-        # Draw calendar date onto calendar
-        draw.text((offset+(day_width+bar_width)*n, 198), str(wr_day.day), (0,0,0), font=day_font)
-        # Draw Saint day onto calendar (max 2 lines)
-        lines = textwrap.wrap(get_saints_day(wr_day, lit_cal), width=20)
-        for ndx, line in enumerate(lines[:2]):
-            draw.text((offset+30+(day_width+bar_width)*n, 198+desc_text_size*ndx), line + ('...' if ndx == 1 and len(lines) > 2 else ''), 'black', font=desc)
-        to_edit[wr_day] = populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width)
-    # Save finalized image
-    img.save(directory + '/' + week_str + '.png')
-    return directory + '/' + week_str + '.png', to_edit
-
-def this_week_at_GTCC(cal_feed, adj_week, start_time = datetime.date.today(), spec_title = False):
-    # Image constants
-    day_width = 160
-    bar_width = day_width/40
-    offset = day_width/20
-    event_text_size = 16
-    text_width = 19
-    desc_text_size = 12
-    desc_width = 23
-    event_text_height = round(1.25*event_text_size)
-    desc_text_height = round(1.25*desc_text_size)
-    event_start_height = 130
-
-    # Get Monday after start_time at midnight
-    next_monday = d_to_dt(next_weekday(start_time+datetime.timedelta(adj_week*7), 0))
-    # Make title date range
-    week_str = (months[next_monday.month - 1] + ' ' +
-                str(next_monday.day) + ' - ' +
-                months[(next_monday + datetime.timedelta(4)).month - 1] + ' ' +
-                str((next_monday + datetime.timedelta(4)).day))
-    # Pull image from template
-    img = Image.open("templates/week.png").convert('RGBA')
-    draw = ImageDraw.Draw(img)
-
-    # Initialize Fonts
-    all_day = ImageFont.truetype("Roboto-Bold.ttf", event_text_size)
-    event = ImageFont.truetype("Roboto-Regular.ttf", event_text_size)
-    desc = ImageFont.truetype("Roboto-Regular.ttf", desc_text_size)
-
-    dofw = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY']
-
-    to_edit = {}
-    # Loop through the 7 days of the week
-    for n in range(5):
-        # Increment days
-        wr_day = next_monday + datetime.timedelta(n)
-        # Draw calendar date onto calendar
-        day_string = dofw[n] + ' ' + str(wr_day.month) + '.' + str(wr_day.day)
-        (w, h) = draw.textsize(day_string,font=event)
-        draw.text(((day_width+bar_width)*n+(day_width-1-w)/2, 80), day_string, 'white', font=event)
-        # Draw Saint day onto calendar (max 2 lines)
-        lines = textwrap.wrap(get_saints_day(wr_day, lit_cal), width=25)
-        if lines:
-            draw.rectangle([(n*(day_width+bar_width),106),(n*(day_width+bar_width)+day_width-1,125)], fill=(255, 222, 118))
-            (w, h) = draw.textsize(lines[0] + ('...' if len(lines) > 1 else ''),font=desc)
-            draw.text(((day_width+bar_width)*n+(day_width-1-w)/2, event_start_height-22), lines[0] + ('...' if len(lines) > 1 else ''), 'black', font=desc)
-        to_edit[wr_day] = populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width)
-    # Save finalized image
-    img.save(directory + '/' + week_str + '.png')
-    return directory + '/' + week_str + '.png', to_edit
-
-def this_weekend_at_GTCC(cal_feed, adj_week, start_time = datetime.date.today(), spec_title = False):
-    # Image constants
-    day_width = 320
-    bar_width = day_width/40
-    offset = day_width/20
-    event_text_size = 24
-    text_width = 26
-    desc_text_size = 18
-    desc_width = 33
-    event_text_height = round(1.25*event_text_size)
-    desc_text_height = round(1.25*desc_text_size)
-    event_start_height = 172
-
-    # Get Monday after start_time at midnight
-    next_friday = d_to_dt(next_weekday(start_time+datetime.timedelta(adj_week*7), 4))
-    # Make title date range
-    week_str = (months[next_friday.month - 1] + ' ' +
-                str(next_friday.day) + ' - ' +
-                months[(next_friday + datetime.timedelta(2)).month - 1] + ' ' +
-                str((next_friday + datetime.timedelta(2)).day))
-    # Pull image from template
-    img = Image.open("templates/weekend.png").convert('RGBA')
-    draw = ImageDraw.Draw(img)
-
-    # Initialize Fonts
-    day_font = ImageFont.truetype("Roboto-Regular.ttf", 32)
-    all_day = ImageFont.truetype("Roboto-Bold.ttf", event_text_size)
-    event = ImageFont.truetype("Roboto-Regular.ttf", event_text_size)
-    desc = ImageFont.truetype("Roboto-Regular.ttf", desc_text_size)
-
-    dofw = ['FRIDAY', 'SATURDAY', 'SUNDAY']
-
-    to_edit = {}
-    # Loop through the 7 days of the week
-    for n in range(3):
-        # Increment days
-        wr_day = next_friday + datetime.timedelta(n)
-        # Draw calendar date onto calendar
-        day_string = dofw[n] + ' ' + str(wr_day.month) + '.' + str(wr_day.day)
-        (w, h) = draw.textsize(day_string,font=day_font)
-        draw.text(((day_width+bar_width)*n+(day_width-1-w)/2, 95), day_string, 'white', font=day_font)
-        # Draw Saint day onto calendar (max 2 lines)
-        lines = textwrap.wrap(get_saints_day(wr_day, lit_cal), width=36)
-        if lines:
-            draw.rectangle([(n*(day_width+bar_width),134),(n*(day_width+bar_width)+day_width-1,172)], fill=(255, 222, 118))
-            (w, h) = draw.textsize(lines[0] + ('...' if len(lines) > 1 else ''),font=desc)
-            draw.text(((day_width+bar_width)*n+(day_width-1-w)/2, event_start_height-30), lines[0] + ('...' if len(lines) > 1 else ''), 'black', font=desc)
-        to_edit[wr_day] = populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width, px = offset)
-    # Save finalized image
-    img.save(directory + '/' + week_str + '.png')
-    return directory + '/' + week_str + '.png', to_edit
-
-def big_calendar(cal_feed, start_time = datetime.date.today(), spec_title = False):
-    # Image constants
-    day_width = 2040
-    bar_width = 20
-    offset = day_width/20
-    event_text_size = 144
-    text_width = 28
-    desc_text_size = 108
-    desc_width = 35
-    event_text_height = round(1.25*event_text_size)
-    desc_text_height = round(1.25*desc_text_size)
-    event_start_height = 3200
-
-    # Get Monday after start_time at midnight
-    first_day = d_to_dt(start_time.replace(day=1,month=(start_time.month%12)+1,year=start_time.year+int(start_time.month/12)))
-    # Pull image from template
-    img = Image.open("templates/monthCal.png").convert('RGBA')
-    draw = ImageDraw.Draw(img)
-
-    # Initialize Fonts
-    day_font = ImageFont.truetype("Roboto-Black.ttf", 250)
-    all_day = ImageFont.truetype("Roboto-Bold.ttf", event_text_size)
-    event = ImageFont.truetype("Roboto-Regular.ttf", event_text_size)
-    desc = ImageFont.truetype("Roboto-Regular.ttf", desc_text_size)
-
-    to_edit = {}
+    # for n in range(7):
+    #     # Increment days
+    #     wr_day = next_monday.replace(days=n)
+    #     # Draw calendar date onto calendar
+    #     draw.text((offset+(day_width+bar_width)*n, 198), str(wr_day.day), (0,0,0), font=day_font)
+    #     # Draw Saint day onto calendar (max 2 lines)
+    #     lines = textwrap.wrap(get_saints_day(wr_day, lit_cal), width=20)
+    #     for ndx, line in enumerate(lines[:2]):
+    #         draw.text((offset+30+(day_width+bar_width)*n, 198+desc_text_size*ndx), line + ('...' if ndx == 1 and len(lines) > 2 else ''), 'black', font=desc)
+    #     to_edit.update(populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width, 0))
     # Loop through the 7 days of the week
     for day in range(calendar.monthrange(first_day.year,first_day.month)[1]):
         # Increment days
-        wr_day = first_day + datetime.timedelta(day)
-        week = wr_day.isocalendar()[1] - first_day.isocalendar()[1] - 1 + (1 if wr_day.weekday() == 6 else 0)
+        wr_day = first_day.replace(days=day)
+        week = wr_day.isocalendar()[1] - first_day.isocalendar()[1] + (0 if wr_day.weekday() == 6 else -1) + 1           # Calendar offset goes here
+        if week < 0:
+            week = week + 52
         n = [1,2,3,4,5,6,0][wr_day.weekday()]
         # Draw calendar date onto calendar
-        draw.text((offset+(day_width+bar_width)*n, 2900+week*1588), str(wr_day.day), (0,0,0), font=day_font)
-        # Draw Saint day onto calendar (max 2 lines)
-        lines = textwrap.wrap(get_saints_day(wr_day, lit_cal), width=28)
-        for ndx, line in enumerate(lines[:2]):
-            draw.text((offset+400+(day_width+bar_width)*n, 2915+week*1588+desc_text_size*ndx), line + ('...' if ndx == 1 and len(lines) > 2 else ''), 'black', font=desc)
-        to_edit[wr_day] = populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height+1588*week, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width)
+        draw.text((offset+(day_width+bar_width)*n, 189+week*102), str(wr_day.day), (0,0,0), font=day_font)
+        #print(day, week, str(wr_day.day))
+        # Draw Saint day onto calendar
+        lit_cal(draw, wr_day.date(), (offset+30+(day_width+bar_width)*n, 189+week*102))
+
+        # to_edit.update(populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width, 0))
+        to_edit.update(populate_day(draw, cal_feed, n, wr_day, offset, bar_width, day_width, event_start_height+102*week, event_text_size, event_text_height, desc_text_height, all_day, event, desc, text_width, desc_width, 6))
     # Save finalized image
     img.save(directory + '/' + months[first_day.month-1] + '.png')
-    return directory + '/' + months[first_day.month-1] + '.png', to_edit
+    return directory + '/' + months[first_day.month-1] + '.png', sorted(list(to_edit), key=lambda event: (event.begin, event.end.timestamp*-1))
