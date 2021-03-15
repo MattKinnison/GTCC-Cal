@@ -1,3 +1,3 @@
 pip install ics
-conda install pillow arrow requests
+pip install pillow arrow requests
 PAUSE
