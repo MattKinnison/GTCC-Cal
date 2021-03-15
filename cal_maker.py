@@ -314,17 +314,8 @@ def draw_calendar(month_offset=1, start_time = arrow.now().floor('day')):
 
     day_bar_wdt = event_fmt['day_width']+event_fmt['bar_width']
 
-    to_edit = set()
-
-    # Find start week
-    start_week = first_day.isocalendar()[1]
-
-    # If its a Sunday, the start of the week is actually the next week
-    if first_day.weekday() == 6:
-         start_week = start_week + 1
-
-    # Get number of weeks in previous year
-    last_yr_NoW = first_day.shift(years=-1).isocalendar()[1]
+    # Initialize week incrementer
+    week = 0
 
     for day in range(calendar.monthrange(first_day.year,first_day.month)[1]):
         # Increment days
@@ -333,30 +324,22 @@ def draw_calendar(month_offset=1, start_time = arrow.now().floor('day')):
         # default weekday func has monday as first day of week. Shift it to Sunday
         DoW = (wr_day.weekday() + 1) % 7
 
-        # Find week of month
-        WoM = wr_day.isocalendar()[1] - start_week
-
-        # If its a Sunday, the start of the week is actually next week
-        if DoW == 0:
-            WoM = WoM + 1
-
-        # If week is less than zero. Index from last week of last year
-        if WoM < 0 and wr_day.month == 1:
-                # In January, add count from last week of last year
-                WoM = WoM + last_yr_NoW
+        # If day is a Sunday, increment week by 1 (unless the month starts on a Sunday)
+        if (DoW == 0) & (wr_day.day != 1):
+            week = week + 1
 
         # Draw calendar date onto calendar
-        draw.text((8+(day_bar_wdt)*DoW, 189+WoM*102), str(wr_day.day), (0,0,0), font=day_font)
+        draw.text((8+(day_bar_wdt)*DoW, 189+week*102), str(wr_day.day), (0,0,0), font=day_font)
 
         # Draw Saint day onto calendar
-        lit_cal(draw, wr_day.date(), (38+(day_bar_wdt)*DoW, 189+WoM*102))
+        lit_cal(draw, wr_day.date(), (38+(day_bar_wdt)*DoW, 189+week*102))
 
         # Draw Events of day onto calendar
-        event_cal(draw, wr_day, ((day_bar_wdt)*DoW, 216+WoM*102))
+        event_cal(draw, wr_day, ((day_bar_wdt)*DoW, 216+week*102))
 
     # Save finalized image
     img.save(directory + '\\' + first_day.format('YY-MM_MMM') + '.png')
-    return directory + '\\' + months[first_day.month-1] + '.png', sorted(list(to_edit), key=lambda event: (event.begin, event.end.timestamp*-1))
+    return directory + '\\' + months[first_day.month-1] + '.png'
 
 
 if __name__ == "__main__":
