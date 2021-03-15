@@ -1,28 +1,13 @@
-try:
-    from pip import main as pipmain
-except:
-    from pip._internal import main as pipmain
-try:
-    from PIL import Image, ImageFont, ImageDraw
-except:
-    pipmain(['install','pillow'])
-    from PIL import Image, ImageFont, ImageDraw
-try:
-    import textwrap
-except:
-    pipmain(['install','textwrap'])
-    import textwrap
+from PIL import Image, ImageFont, ImageDraw
+import textwrap
 import ics
-try:
-    import arrow
-except:
-    pipmain(['install','arrow'])
-    import arrow
+import arrow
 import requests
 import re
 import random
 import calendar
 import os
+import sys
 
 directory = os.path.expanduser('~\\Pictures\\St. Monica Calendars')
 months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec']
@@ -226,7 +211,7 @@ class event_calendar:
 
         ## Hourly Events ##
         # Filter for shorter events on this date
-        hourly_events  = [event for event in self.cal_feed if event.begin <= dt.ceil('day') and event.end >= dt.floor('day')]
+        hourly_events  = [event for event in self.cal_feed if not event.all_day and event.begin <= dt.ceil('day') and event.end >= dt.floor('day')]
         # Sort by first start date (then by last end date if two events start simultaneously)
         hourly_events = sorted(hourly_events, key=lambda event: (event.begin, event.end.timestamp*-1))
 
@@ -237,7 +222,7 @@ class event_calendar:
         event_strs = [self.make_printable(event) for event in events]
 
         # Isolate events that have signups (may need to be modified over time)
-        signup_events = ['33 Days', 'Consoling the Heart']
+        signup_events = ['33 Days', 'Consoling the Heart', 'SEEK Day']
 
         # Determine which events are signup events
         is_signup = [any([(s_e in e_str) for s_e in signup_events]) for e_str in event_strs]
@@ -258,14 +243,20 @@ class event_calendar:
 
                     # end_x depends on if event continues into next day. Calculate
                     end_x = loc[0] + self.fmt['day_width'] - 1
-                    if e.end.replace(days=-2) > dt:
+                    if e.end.shift(days=-1) > dt:
                         end_x = end_x + self.fmt['bar_width']
 
+                    # Differentiate all day events in a different color
+                    if e.all_day:
+                        color = self.fmt['ad_color']
+                    else:
+                        color = self.fmt['color']
+
                     # Draw line
-                    draw.line(((loc[0], y), (end_x, y)), fill=self.fmt['color'], width=self.fmt['font'].size + self.fmt['spacing'] + 1)
+                    draw.line(((loc[0], y), (end_x, y)), fill=color, width=self.fmt['font'].size + self.fmt['spacing'] + 1)
 
                     # Move down
-                    bar_px = bar_px + self.fmt['font'].size + self.fmt['spacing']
+                    bar_px = bar_px + self.fmt['font'].size + self.fmt['spacing'] + 1
 
         ## Draw text for event background ##
         for signup, lines in zip(is_signup, event_strs):
@@ -277,7 +268,7 @@ class event_calendar:
                     draw.text((loc[0] + self.fmt['offset'], loc[1] + txt_px - 1), line, fill='white', font=self.fmt['font'])
 
                 # Move down
-                txt_px = txt_px + self.fmt['font'].size + self.fmt['spacing']
+                txt_px = txt_px + self.fmt['font'].size + self.fmt['spacing'] + 1
 
 def draw_calendar(month_offset=1, start_time = arrow.now().floor('day')):
     # Formatting constraints for feast days
@@ -289,6 +280,7 @@ def draw_calendar(month_offset=1, start_time = arrow.now().floor('day')):
     # Formatting constraints for events
     event_fmt = {'char_width': 23,
                  'color': (165,44,38),
+                 'ad_color': (128, 128, 128),
                  'font': ImageFont.truetype("fonts\\Roboto-Bold.ttf", 12),
                  'signup_font': ImageFont.truetype("fonts\\Roboto-Regular.ttf", 12),
                  'day_width': 160,
@@ -304,7 +296,7 @@ def draw_calendar(month_offset=1, start_time = arrow.now().floor('day')):
     event_cal = event_calendar(cal_link, event_fmt)
 
     # Get Monday after start_time at midnight
-    first_day = start_time.replace(months=month_offset).floor('month') # Change month here
+    first_day = start_time.shift(months=month_offset).floor('month') # Change month here
 
     # Pull image from template
     img = Image.open("templates/glance.png").convert('RGBA')
@@ -328,9 +320,12 @@ def draw_calendar(month_offset=1, start_time = arrow.now().floor('day')):
     if first_day.weekday() == 6:
          start_week = start_week + 1
 
+    # Get number of weeks in previous year
+    last_yr_NoW = first_day.shift(years=-1).isocalendar()[1]
+
     for day in range(calendar.monthrange(first_day.year,first_day.month)[1]):
         # Increment days
-        wr_day = first_day.replace(days=day)
+        wr_day = first_day.shift(days=day)
 
         # default weekday func has monday as first day of week. Shift it to Sunday
         DoW = (wr_day.weekday() + 1) % 7
@@ -342,12 +337,10 @@ def draw_calendar(month_offset=1, start_time = arrow.now().floor('day')):
         if DoW == 0:
             WoM = WoM + 1
 
-
-         # + (0 if wr_day.weekday() == 6 else -1) + 1           # Calendar offset goes here
-
-        # If week is less than
-        if WoM < 0:
-            WoM = WoM + 52
+        # If week is less than zero. Index from last week of last year
+        if WoM < 0 and wr_day.month == 1:
+                # In January, add count from last week of last year
+                WoM = WoM + last_yr_NoW
 
         # Draw calendar date onto calendar
         draw.text((8+(day_bar_wdt)*DoW, 189+WoM*102), str(wr_day.day), (0,0,0), font=day_font)
@@ -361,3 +354,7 @@ def draw_calendar(month_offset=1, start_time = arrow.now().floor('day')):
     # Save finalized image
     img.save(directory + '\\' + first_day.format('YY-MM_MMM') + '.png')
     return directory + '\\' + months[first_day.month-1] + '.png', sorted(list(to_edit), key=lambda event: (event.begin, event.end.timestamp*-1))
+
+
+if __name__ == "__main__":
+   draw_calendar(sys.argv[1])
