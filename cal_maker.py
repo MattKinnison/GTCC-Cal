@@ -357,4 +357,4 @@ def draw_calendar(month_offset=1, start_time = arrow.now().floor('day')):
 
 
 if __name__ == "__main__":
-   draw_calendar(sys.argv[1])
+   draw_calendar(int(sys.argv[1]))
