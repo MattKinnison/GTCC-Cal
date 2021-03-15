@@ -259,13 +259,16 @@ class event_calendar:
                     bar_px = bar_px + self.fmt['font'].size + self.fmt['spacing'] + 1
 
         ## Draw text for event background ##
-        for signup, lines in zip(is_signup, event_strs):
+        for e, signup, lines in zip(events, is_signup, event_strs):
             for line in lines:
                 # Draw text
+
                 if signup:
                     draw.text((loc[0] + self.fmt['offset'], loc[1] + txt_px), line, fill=self.fmt['color'], font=self.fmt['signup_font'])
                 else:
-                    draw.text((loc[0] + self.fmt['offset'], loc[1] + txt_px - 1), line, fill='white', font=self.fmt['font'])
+                    if (not e.all_day) or (dt.weekday() == 6) or (e.begin.date() == dt.date()):
+                        # Only fill if hourly event, or Sunday, or first day of multiple
+                        draw.text((loc[0] + self.fmt['offset'], loc[1] + txt_px - 1), line, fill='white', font=self.fmt['font'])
 
                 # Move down
                 txt_px = txt_px + self.fmt['font'].size + self.fmt['spacing'] + 1
